@@ -1,0 +1,87 @@
+<script>
+    function searchPoint() {
+        var searchValue = document.getElementById("searchBox").value.toLowerCase();
+    // Get the first Plotly div on the page
+    // const graphDiv_ = document.querySelector(".plotly-graph-div");
+  
+    // if (graphDiv) {
+    //     const divId = graphDiv.id;
+    //     console.log("Extracted Plotly div ID:", divId);
+    // } else {
+    //     console.log("No Plotly graph div found.");
+    // }
+  
+    //     var graphDiv = document.getElementById('b61bc8f5-0d04-4d05-a88e-afbc37138a6f');  // Ensure this matches your div_id
+        var graphDiv = document.querySelector(".plotly-graph-div")
+        var plotData = graphDiv.data;  // Get all traces
+  
+        if (!plotData || plotData.length === 0) {
+            document.getElementById("message").innerHTML = "No data found in the plot!";
+            return;
+        }
+  
+        let subIndex = -1;
+        let arrIndex = -1;
+        var lasthoverText = "None";  // Initialize lasthoverText outside of the loop
+  
+        for (let traceIndex = 0; traceIndex < plotData.length; traceIndex++) {
+            let hoverText = plotData[traceIndex].hovertext;  // Get hovertext (PIDs)
+  
+            if (!hoverText) continue;  // Skip if hovertext is missing
+  
+            // Loop over each item in hoverText to check if it matches the search value
+            for (let i = 0; i < hoverText.length; i++) {
+                lasthoverText = hoverText[i].toLowerCase();  // Update the last hover text
+                if (hoverText[i].toLowerCase().includes(searchValue)) {
+                    subIndex = i;
+                    arrIndex = traceIndex;
+                    break;
+                }
+            }
+  
+            // If we find a match, break the outer loop as well
+            if (subIndex !== -1) break;
+        }
+  
+        // After searching through the hovertext arrays, provide the result
+        if (subIndex !== -1) {
+            // Reset all markers' color and size (this will apply to all points in the dataset)
+  
+            // let xValue = plotData[arrIndex].x._inputArray[subIndex];
+            // let yValue = plotData[arrIndex].y._inputArray[subIndex];
+  
+            // let xmarg1 = Math.min(...plotData[arrIndex].x._inputArray);
+            // let xmarg2 = Math.max(...plotData[arrIndex].x._inputArray);  
+            // let xmargin = Math.min([xmarg1,xmarg2])
+  
+            // let ymarg1 = Math.min(...plotData[arrIndex].y._inputArray);  
+            // let ymarg2 = Math.max(...plotData[arrIndex].y._inputArray);  
+            // let ymargin = Math.min([ymarg1,ymarg2])
+  
+            // Plotly.relayout(graphDiv, {
+            //       "xaxis.range": [xValue - xmargin, xValue + xmargin],
+            //       "yaxis.range": [yValue - ymargin, yValue + ymargin]
+            // });
+  
+  
+            // Plotly.relayout(graphDiv, {
+            //       "xaxis.range": [xmarg1, xmarg2],
+            //       "yaxis.range": [ymarg1, ymarg2]
+            // });
+  
+            // Update only the specific point (arrIndex, subIndex)
+            let updateDataArr = plotData[arrIndex];
+            updateDataArr.marker.line.color[subIndex] = 'black';
+            updateDataArr.marker.line.width[subIndex] = 1 ;
+            updateDataArr.marker.size[subIndex] = 30 ;
+            updateDataArr.marker.opacity[subIndex] = 0.5 ;
+
+            plotData[arrIndex] = updateDataArr ;
+            Plotly.restyle(graphDiv, plotData[arrIndex],[arrIndex]);
+  
+            document.getElementById("message").innerHTML = "PID '" + lasthoverText + "' found and highlighted!" ;
+        } else {
+            document.getElementById("message").innerHTML = "PID '" + searchValue + "' not found!"  ;
+        }
+    }
+  </script>

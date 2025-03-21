@@ -35,7 +35,7 @@ def initiate_model(args, ckpt_path, device='cuda'):
         else:
             model = MIL_fc(**model_dict)
 
-    print_network(model)
+    # print_network(model)
 
     ckpt = torch.load(ckpt_path)
     ckpt_clean = {}
@@ -44,6 +44,37 @@ def initiate_model(args, ckpt_path, device='cuda'):
             continue
         ckpt_clean.update({key.replace('.module', ''):ckpt[key]})
     model.load_state_dict(ckpt_clean, strict=True)
+
+    _ = model.to(device)
+    _ = model.eval()
+    return model
+
+def initiate_model_extensive(args, ckpt_path, device='cuda'):
+    print('Init Model')    
+    model_dict = {"dropout": args.drop_out, 'n_classes': args.n_classes, "embed_dim": args.embed_dim}
+    
+    if args.model_size is not None and args.model_type in ['clam_sb', 'clam_mb']:
+        model_dict.update({"size_arg": args.model_size})
+    
+    if args.model_type =='clam_sb':
+        model = CLAM_SB(**model_dict)
+    elif args.model_type =='clam_mb':
+        model = CLAM_MB(**model_dict)
+    elif args.model_type == 'addmil':
+        model_dict.update({'additive': True})
+        model = AttentionSingleBranch(**model_dict)
+    else: # args.model_type == 'mil'
+        if args.n_classes > 2:
+            model = MIL_fc_mc(**model_dict)
+        else:
+            model = MIL_fc(**model_dict)
+
+    # print_network(model)
+
+    print("loading checkpoint")
+    checkpoint = torch.load(ckpt_path, weights_only=True)
+    model.load_state_dict(checkpoint['model_state_dict'])
+
 
     _ = model.to(device)
     _ = model.eval()

@@ -6,6 +6,7 @@ from xml.dom import minidom
 import multiprocessing as mp
 import cv2
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import numpy as np
 import openslide
 from PIL import Image
@@ -494,7 +495,9 @@ class WholeSlideImage(object):
                    binarize=False, thresh=0.5,
                    max_size=None,
                    custom_downsample = 1,
-                   cmap='coolwarm'):
+                   cmap='coolwarm',
+                   return_scores = False,
+                   colorbar = False):
 
         """
         Args:
@@ -672,7 +675,45 @@ class WholeSlideImage(object):
             resizeFactor = max_size/w if w > h else max_size/h
             img = img.resize((int(w*resizeFactor), int(h*resizeFactor)))
        
-        return img
+        if colorbar:
+            # colorbars!
+            # Create a figure and axis
+            fig, ax = plt.subplots(figsize=(10, 10))
+            ax.imshow(img)
+
+            # Create a ScalarMappable for the colorbar
+            norm = mcolors.Normalize(vmin=scores.min(), vmax=scores.max())
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+
+            # Add a colorbar
+            cbar = plt.colorbar(sm, ax=ax, fraction=0.02, pad=0.04)
+            cbar.set_label("Patch Score Intensity")
+            vmin, vmax = min(scores), max(scores)
+
+            cbar.ax.yaxis.set_ticks_position('both')  # 'both' means ticks on both sides
+            cbar.ax.annotate(f"Max: {vmax:.2f}", 
+                            xy=(0.5, 1), 
+                            xycoords='axes fraction',
+                            ha='center', va='center', 
+                            fontsize=12, color='black', fontweight='bold',
+                            bbox=dict(facecolor='white', edgecolor='none', boxstyle='round,pad=0.2'))
+
+
+            # Show the heatmap with colorbar
+            plt.axis("off")
+            plt.show()
+            
+        else:
+            fig = None
+            ax = None
+            cbar = None    
+            
+        if return_scores:
+            return img, scores, (fig,ax,cbar)
+
+
+        return img, (fig,ax,cbar)
 
     
     def block_blending(self, img, vis_level, top_left, bot_right, alpha=0.5, blank_canvas=False, block_size=1024):

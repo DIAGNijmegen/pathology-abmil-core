@@ -34,7 +34,7 @@ class SubsetSequentialSampler(Sampler):
 
 def collate_MIL(batch):
 	img = torch.cat([item[0] for item in batch], dim = 0)
-	label = torch.LongTensor([item[1] for item in batch])
+	label = torch.LongTensor(np.array([item[1] for item in batch]))
 	return [img, label]
 
 def collate_features(batch):
@@ -64,15 +64,17 @@ def get_split_loader(split_dataset, training = False, testing = False, weighted 
 			loader = DataLoader(split_dataset, batch_size=1, sampler = SequentialSampler(split_dataset), collate_fn = collate_MIL, **kwargs)
 	
 	else:
-		ids = np.random.choice(np.arange(len(split_dataset), int(len(split_dataset)*0.1)), replace = False)
+		ids = np.random.choice(np.arange(len(split_dataset)), int(len(split_dataset)*0.02), replace = False)
 		loader = DataLoader(split_dataset, batch_size=1, sampler = SubsetSequentialSampler(ids), collate_fn = collate_MIL, **kwargs )
 
 	return loader
 
 def get_optim(model, args):
 	if args.opt == "adam":
+		print("\noptimizer Adam with lr", args.lr, 'decay ', args.reg)
 		optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=args.reg)
 	elif args.opt == 'sgd':
+		print("\noptimizer sgd with lr", args.lr, 'decay ', args.reg)
 		optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, momentum=0.9, weight_decay=args.reg)
 	else:
 		raise NotImplementedError
@@ -145,7 +147,7 @@ def calculate_error(Y_hat, Y):
 	return error
 
 def make_weights_for_balanced_classes_split(dataset):
-	N = float(len(dataset))                                           
+	N = float(len(dataset))    
 	weight_per_class = [N/len(dataset.slide_cls_ids[c]) for c in range(len(dataset.slide_cls_ids))]                                                                                                     
 	weight = [0] * int(N)                                           
 	for idx in range(len(dataset)):   
