@@ -40,6 +40,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		patient_strat=False,
 		label_col = None,
 		patient_voting = 'max',
+		datatype="h5"
 		):
 		"""
 		Args:
@@ -64,7 +65,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		slide_data = pd.read_csv(csv_path)
 		slide_data = self.filter_df(slide_data, filter_dict)
 		slide_data = self.df_prep(slide_data, self.label_dict, ignore, self.label_col)
-
+		self.datatype = datatype
 		###shuffle data
 		if shuffle:
 			np.random.seed(seed)
@@ -83,8 +84,8 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		self.patient_cls_ids = [[] for i in range(self.num_classes)]		
 		for i in range(self.num_classes):
 			self.patient_cls_ids[i] = np.where(self.patient_data['label'] == i)[0]
-
 		# store ids corresponding each class at the slide level
+
 		self.slide_cls_ids = [[] for i in range(self.num_classes)]
 		for i in range(self.num_classes):
 			self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
@@ -192,7 +193,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		if len(split) > 0:
 			mask = self.slide_data['slide_id'].isin(split.tolist())
 			df_slice = self.slide_data[mask].reset_index(drop=True)
-			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes)
+			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
 		else:
 			split = None
 		
@@ -208,7 +209,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		if len(split) > 0:
 			mask = self.slide_data['slide_id'].isin(merged_split)
 			df_slice = self.slide_data[mask].reset_index(drop=True)
-			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes)
+			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
 		else:
 			split = None
 		
@@ -216,8 +217,6 @@ class Generic_WSI_Classification_Dataset(Dataset):
 
 
 	def return_splits(self, from_id=True, csv_path=None):
-
-
 		if from_id:
 			if len(self.train_ids) > 0:
 				train_data = self.slide_data.loc[self.train_ids].reset_index(drop=True)
@@ -228,14 +227,14 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			
 			if len(self.val_ids) > 0:
 				val_data = self.slide_data.loc[self.val_ids].reset_index(drop=True)
-				val_split = Generic_Split(val_data, data_dir=self.data_dir, num_classes=self.num_classes)
+				val_split = Generic_Split(val_data, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
 
 			else:
 				val_split = None
 			
 			if len(self.test_ids) > 0:
 				test_data = self.slide_data.loc[self.test_ids].reset_index(drop=True)
-				test_split = Generic_Split(test_data, data_dir=self.data_dir, num_classes=self.num_classes)
+				test_split = Generic_Split(test_data, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
 			
 			else:
 				test_split = None
@@ -324,6 +323,7 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 	def load_from_h5(self, toggle):
 		self.use_h5 = toggle
 
+
 	def __getitem__(self, idx):
 		slide_id = self.slide_data['slide_id'][idx]
 		label = self.slide_data['label'][idx]
@@ -333,16 +333,24 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 		else:
 			data_dir = self.data_dir
 
-		if not self.use_h5:
+		if self.datatype == "pt":
 			if self.data_dir:
-				full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))
-				features = torch.load(full_path)
+				full_path = os.path.join(data_dir, '{}.pt'.format(slide_id))
+				# full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))
+				features = torch.load(features)
 				return features, label
 			
 			else:
 				return slide_id, label
 
-		else:
+		elif self.datatype == "npy":
+			full_path = os.path.join(data_dir, '{}.npy'.format(slide_id))
+			features = np.load(full_path)
+			features = torch.from_numpy(features)
+			return features, label
+
+
+		elif self.use_h5:
 			full_path = os.path.join(data_dir,'h5_files','{}.h5'.format(slide_id))
 			with h5py.File(full_path,'r') as hdf5_file:
 				features = hdf5_file['features'][:]
@@ -353,7 +361,7 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 
 
 class Generic_Split(Generic_MIL_Dataset):
-	def __init__(self, slide_data, data_dir=None, num_classes=2):
+	def __init__(self, slide_data, data_dir=None, num_classes=2,datatype=None):
 		self.use_h5 = False
 		self.slide_data = slide_data
 		self.data_dir = data_dir
@@ -361,6 +369,7 @@ class Generic_Split(Generic_MIL_Dataset):
 		self.slide_cls_ids = [[] for i in range(self.num_classes)]
 		for i in range(self.num_classes):
 			self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
+		self.datatype = datatype
 
 	def __len__(self):
 		return len(self.slide_data)
