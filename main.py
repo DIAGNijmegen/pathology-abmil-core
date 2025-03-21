@@ -22,6 +22,7 @@ import numpy as np
 
 from sklearn.metrics import f1_score #Added to calculate F1-score
 
+
 def main(args):
     # create results directory if necessary
     if not os.path.isdir(args.results_dir):
@@ -97,6 +98,8 @@ parser.add_argument('--reg', type=float, default=1e-5,
                     help='weight decay (default: 1e-5)')
 parser.add_argument('--seed', type=int, default=1, 
                     help='random seed for reproducible experiment (default: 1)')
+parser.add_argument('--use_wandb', action='store_true', default=False,
+                     help='use weight and biases for logging')
 parser.add_argument('--k', type=int, default=10, help='number of folds (default: 10)')
 parser.add_argument('--k_start', type=int, default=-1, help='start fold (default: -1, last fold)')
 parser.add_argument('--k_end', type=int, default=-1, help='end fold (default: -1, first fold)')
@@ -116,7 +119,7 @@ parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mi
 parser.add_argument('--exp_code', type=str, help='experiment code for saving results')
 parser.add_argument('--weighted_sample', action='store_true', default=False, help='enable weighted sampling')
 parser.add_argument('--model_size', type=str, choices=['small', 'big'], default='small', help='size of model, does not affect mil')
-parser.add_argument('--task', type=str, choices=['cscc_vs_noncscc', 'task_1_tumor_vs_normal',  'task_2_tumor_subtyping'])
+parser.add_argument('--task', type=str, choices=['cscc_vs_noncscc', 'task_1_tumor_vs_normal',  'task_2_tumor_subtyping',"bcc_bin"])
 ### CLAM specific options
 parser.add_argument('--no_inst_cluster', action='store_true', default=False,
                      help='disable instance-level clustering')
@@ -127,7 +130,9 @@ parser.add_argument('--subtyping', action='store_true', default=False,
 parser.add_argument('--bag_weight', type=float, default=0.7,
                     help='clam: weight coefficient for bag-level loss (default: 0.7)')
 parser.add_argument('--B', type=int, default=8, help='number of positive/negative patches to sample for clam')
-parser.add_argument('--data_label_csv_path', type=str, default=None, help='data label directory')    
+parser.add_argument('--data_label_csv_path', type=str, default=None, help='data label directory') 
+parser.add_argument('--datatype', type=str, default="pt", help='data type',choices=["npy","h5","pt"])    
+parser.add_argument('--resume', action='store_true', default=False, help='resume training')
 args = parser.parse_args()
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -206,7 +211,23 @@ elif args.task == 'task_2_tumor_subtyping':
 
     if args.model_type in ['clam_sb', 'clam_mb']:
         assert args.subtyping 
-        
+
+elif args.task == 'bcc_bin':
+    args.n_classes=2
+    dataset = Generic_MIL_Dataset(csv_path = args.data_label_csv_path , 
+                            data_dir= args.data_root_dir,
+                            shuffle = False, 
+                            seed = args.seed, 
+                            print_info = True,
+                            label_dict = {'normal': 0, 'bcc': 1},
+                            patient_strat= False,
+                            ignore=[],
+                            datatype=args.datatype)
+
+    if args.model_type in ['clam_sb', 'clam_mb']:
+        assert args.subtyping 
+
+
 else:
     raise NotImplementedError
     
