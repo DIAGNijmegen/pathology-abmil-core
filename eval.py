@@ -16,6 +16,7 @@ import h5py
 from utils.eval_utils import *
 from sklearn.metrics import f1_score #Added to calculate F1-score
 
+
 # Training settings
 parser = argparse.ArgumentParser(description='CLAM Evaluation Script')
 parser.add_argument('--data_root_dir', type=str, default=None,
@@ -49,7 +50,7 @@ args = parser.parse_args()
 
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-args.save_dir = os.path.join(args.results_dir, 'EVAL_' + str(args.save_exp_code))
+args.save_dir = os.path.join('./eval_results', 'EVAL_' + str(args.save_exp_code))
 args.models_dir = os.path.join(args.results_dir, str(args.models_exp_code))
 
 os.makedirs(args.save_dir, exist_ok=True)

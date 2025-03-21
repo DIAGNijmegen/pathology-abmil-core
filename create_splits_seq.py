@@ -12,15 +12,11 @@ parser.add_argument('--seed', type=int, default=1,
                     help='random seed (default: 1)')
 parser.add_argument('--k', type=int, default=10,
                     help='number of splits (default: 10)')
-parser.add_argument('--task', type=str, choices=['cscc_vs_noncscc', 'task_1_tumor_vs_normal', 'task_2_tumor_subtyping'])
+parser.add_argument('--task', type=str, choices=['cscc_vs_noncscc', 'task_1_tumor_vs_normal', 'task_2_tumor_subtyping',"bcc_bin"],)
 parser.add_argument('--val_frac', type=float, default= 0.1,
                     help='fraction of labels for validation (default: 0.1)')
 parser.add_argument('--test_frac', type=float, default= 0.1,
                     help='fraction of labels for test (default: 0.1)')
-parser.add_argument('--data_root_dir', type=str, default=None,
-                    help='data directory')
-parser.add_argument('--data_label_csv_path', type=str, default=None,
-                    help='data directory')
 
 args = parser.parse_args()
 
@@ -54,7 +50,16 @@ elif args.task == 'cscc_vs_noncscc':
                             label_dict = {'non-cscc':0, 'cscc':1},
                             patient_strat=True,
                             ignore=[])
-
+elif args.task == 'bcc_bin':
+    args.n_classes=2
+    dataset = Generic_WSI_Classification_Dataset(csv_path = args.data_label_csv_path,
+                            shuffle = False, 
+                            seed = args.seed, 
+                            print_info = True,
+                            label_dict = {'normal':0, 'bcc':1},
+                            patient_strat=True,
+                            ignore=[])
+    
 else:
     raise NotImplementedError
 
