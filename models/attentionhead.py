@@ -117,14 +117,16 @@ class AttentionSingleBranch(nn.Module):
         dropout: bool = False,
         n_classes: int = 2,
         additive: bool = False,
-        embed_dim=1024
+        embed_dim=1024,
     ):
         super().__init__()
 
         #if size is None:
-        if size_arg == "small":
-            embed_dim = 1024
-            size = (embed_dim, 512, 256) #small in CLAM. #TODO embed_dim is hardcoded to 1024 in this version
+        # if size_arg == "small":
+            # embed_dim = 1024
+            # size = (embed_dim, 512, 256) #small in CLAM. #TODO embed_dim is hardcoded to 1024 in this version
+        self.size_dict = {"small": [embed_dim, 512, 256], "big": [embed_dim, 512, 384]}
+        size = self.size_dict[size_arg]
 
         self.additive = additive
         self.n_classes = n_classes
@@ -182,9 +184,12 @@ class AttentionSingleBranch(nn.Module):
         -------
 
         """
+        if x.ndim > 2 and x.shape[0] == 1:
+            x = x.squeeze(0)
+        a = x.shape
         x, att_raw, att = self._compute_attention(x) # x=h, att_raw=A_raw, att=A
-        #pooled_features = torch.bmm(att, x) #batch matrix-matrix product # M = torch.mm(A, h) #torch.Size([1, 1, 512])
-        pooled_features = torch.mm(att, x) #torch.Size([1, 512])
+        pooled_features = torch.mm(att, x) 
+        # print("pooled: ", pooled_features.shape, "x_trans: ", x.shape)
         att_pool_logits = self.classifiers(pooled_features)
 
         results_dict = {"attention": att_raw}
@@ -197,7 +202,9 @@ class AttentionSingleBranch(nn.Module):
             )
 
             return bag_logits, att_raw, results_dict
-        return att_pool_logits, att_raw, results_dict
+        
+        else:
+            return att_pool_logits, att_raw, results_dict
 
 class AttentionMultiBranch(AttentionSingleBranch):
     """Multi-branch weakly supervised classification and segmentation with additive constraints.
