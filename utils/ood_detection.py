@@ -1,8 +1,6 @@
-import argparse
-import pdb
+
 import os
-import math
-from typing import Callable, List, Optional, TypeVar, Any, Dict, KeysView, Tuple, Union
+from typing import Callable,  Optional,  Tuple
 import logging
 log = logging.getLogger(__name__)
 from pathlib import Path
@@ -14,7 +12,7 @@ from utils.utils import *
 # pytorch imports
 import torch
 from torch import Tensor, logsumexp
-from torch.utils.data import DataLoader, sampler, TensorDataset
+from torch.utils.data import DataLoader,  TensorDataset
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.multiprocessing
@@ -29,13 +27,14 @@ from tqdm import tqdm
 from pytorch_ood.detector import EnergyBased, MaxSoftmax, MaxLogit, Entropy, ODIN, Mahalanobis, RMD, KLMatching, SHE, DICE, MCD, TemperatureScaling, OpenMax, KNN
 from pytorch_ood.utils import OODMetrics, TensorBuffer, contains_unknown, is_known,  is_unknown
 from bs4 import BeautifulSoup
+import umap
 
 from sklearn.manifold import TSNE
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.colors as pc
 from datetime import datetime
 
-from sklearn.metrics import f1_score #Added to calculate F1-score
 os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 ***REMOVED***
 
@@ -291,117 +290,6 @@ def precompute_logits(model,loader,loader_name, device,args,recompute=True):
     return DataLoader(dataset, batch_size=10, shuffle=False, sampler=None,
                     batch_sampler=None)
 
-
-
-
-def features_to_TSNE(loader,filenames,model,task,experiment,label_dict=None, split=None,extra_label="",output="/data/temporary/ivan/DeepDerma/OOD/results/"):
-    buffer = TensorBuffer()
-    print("TSNE: start \n")
-    with torch.no_grad():
-        for batch in tqdm(loader,total=len(loader),ncols=50):
-            x, y = batch
-            x = x.to(device)
-            # for CLAM features we have to unsqueeze the first dimension 
-            x = x.unsqueeze(0) 
-            y = y.to(device)
-            z = model(x)
-            z = z.view(z.shape[0], -1)  # flatten
-            buffer.append("embedding", z)
-            buffer.append("label", y)
-        print("TSNE: done extracting features \n")
-
-    z = buffer.get("embedding").detach().to("cpu")
-    y = buffer.get("label")
-
-    aggregated_vectors = np.array(z)
-    labels = np.array(y)
-
-    tsne = TSNE(n_components=2, random_state=42, n_jobs=-1)
-    tsne_results = tsne.fit_transform(aggregated_vectors)
-
-    df_tsne = pd.DataFrame({
-        "TSNE-1": tsne_results[:, 0],
-        "TSNE-2": tsne_results[:, 1],
-        "PIDs" : filenames,
-        "Cluster": ["In distribution" if lbl >= 0  else "Out of distribution" for lbl in labels],
-        "Class" : [label_dict[lbl] for lbl in labels],
-        "Symbol" :  ["circle" if lbl >= 0 else "square"for lbl in labels],
-        "Size" : [6 for lbl in labels],
-        "Opacity" : [0.8 for lbl in labels],
-        "Border" : [False for lbl in labels]
-    })
-
-
-
-    fig = go.Figure()
-
-    for class_name, group in df_tsne.groupby("Class"):
-        fig.add_trace(go.Scatter(
-            x=group["TSNE-1"],
-            y=group["TSNE-2"],
-            mode="markers",
-            hovertext=group["PIDs"],
-            marker=dict(size = list(group["Size"]), 
-                opacity=list(group["Opacity"]), 
-                symbol = group["Symbol"],
-                line=dict(
-                    width=[2 if border else 0 for border in group["Border"]],
-                    color=["black" if border else "rgba(0,0,0,0)" for border in group["Border"]]
-                )
-            ),
-            name=class_name
-        ))
-
-    fig.update_layout(
-        title=f"TSNE Projection {task}",
-        xaxis_title="Dimension 1",
-        yaxis_title="Dimension 2",
-        legend_title="Class"
-    )
-
-    fig.show()
-
-
-    output_html = Path(output) / f"{experiment}/{task}_{split}_{extra_label}.html"
-    Path(output_html).parent.mkdir(parents=True, exist_ok=True) 
-
-    fig.write_html(output_html)
-
-    """" Insert HTML code for search functionality"""
-    begin_body_file = "./utils/begin_html_insertion.html"
-    end_body_file = "./utils/end_html_insertion.html"
-
-    # Read the beginning and ending code blocks
-    with open(begin_body_file, "r", encoding="utf-8") as file:
-        begin_body_content = file.read()
-
-    with open(end_body_file, "r", encoding="utf-8") as file:
-        end_body_content = file.read()
-
-    # Load the main HTML file
-    with open(output_html, "r", encoding="utf-8") as file:
-        soup = BeautifulSoup(file, "html.parser")
-
-    # Find the body tag
-    body_tag = soup.body
-
-    if body_tag:
-        # Insert the beginning content at the start of the body
-        body_tag.insert(0, BeautifulSoup(begin_body_content, "html.parser"))
-
-        # Append the ending content at the end of the body
-        body_tag.append(BeautifulSoup(end_body_content, "html.parser"))
-
-        # Save the modified HTML file
-        with open(output_html, "w", encoding="utf-8") as file:
-            file.write(str(soup.prettify()))
-
-        print("HTML updated successfully!")
-
-        print(f"TSNE saved in: {output_html}")
-
-
-
 def RAW_FEATURE_SPACE(model):
     return lambda x: aggregrate_patch_features(lambda y: y,x , transformed=False)
 def TRANSFORMED_FEATURE_SPACE(model):
@@ -468,30 +356,30 @@ def prepare_ood_detectors(model,args):
             knn_kwargs = {'metric': 'euclidean'}  # You can adjust this as needed
             # RAW_FEATURE_SPACE(model) is the model > dictates input aggregration
  
-            # feature_detectors["KNN-raw"] = fit_on_branch_outputs(KNN, RAW_FEATURE_SPACE(model), **knn_kwargs)
-            # feature_detectors["KNN-att"] = fit_on_branch_outputs(KNN, ATTENDED_FEATURE_SPACE(model), **knn_kwargs)
+            feature_detectors["KNN-raw"] = fit_on_branch_outputs(KNN, RAW_FEATURE_SPACE(model), **knn_kwargs)
+            feature_detectors["KNN-att"] = fit_on_branch_outputs(KNN, ATTENDED_FEATURE_SPACE(model), **knn_kwargs)
             feature_detectors["KNN-attinv"] = fit_on_branch_outputs(KNN, INVATTENDED_FEATURE_SPACE(model), **knn_kwargs)
-            # feature_detectors["KNN-trans"] = fit_on_branch_outputs(KNN, TRANSFORMED_FEATURE_SPACE(model), **knn_kwargs)
+            feature_detectors["KNN-trans"] = fit_on_branch_outputs(KNN, TRANSFORMED_FEATURE_SPACE(model), **knn_kwargs)
 
         elif detector_name == "RMD":
             # Calculates a cluster center mu for each cluster, and a shared covariance matrix S from the data. 
             # Additionally, it fits a background gaussian with mean mu and covariance matrix S to all of the 
             # features and calculates outlier score of an input as the minimum difference between mahalanobis score for a cluster
             # and the mahalanobis score for the background gaussian.
-            # feature_detectors["RMD-raw"] =  fit_on_branch_outputs(RMD, RAW_FEATURE_SPACE(model))
-            # feature_detectors["RMD-att"] =  fit_on_branch_outputs(RMD, ATTENDED_FEATURE_SPACE(model))
-            # feature_detectors["RMD-attinv"] =  fit_on_branch_outputs(RMD, INVATTENDED_FEATURE_SPACE(model))
+            feature_detectors["RMD-raw"] =  fit_on_branch_outputs(RMD, RAW_FEATURE_SPACE(model))
+            feature_detectors["RMD-att"] =  fit_on_branch_outputs(RMD, ATTENDED_FEATURE_SPACE(model))
+            feature_detectors["RMD-attinv"] =  fit_on_branch_outputs(RMD, INVATTENDED_FEATURE_SPACE(model))
             feature_detectors["RMD-attinvmaxnorm"] =  fit_on_branch_outputs(RMD, INVATTENDED_FEATURE_SPACE(model))
-            # feature_detectors["RMD-trans"] =  fit_on_branch_outputs(RMD, TRANSFORMED_FEATURE_SPACE(model))
+            feature_detectors["RMD-trans"] =  fit_on_branch_outputs(RMD, TRANSFORMED_FEATURE_SPACE(model))
 
 
 
         elif detector_name == "Mahalanobis":
-            # feature_detectors["Mahalanobis-raw"] = fit_on_branch_outputs(Mahalanobis, RAW_FEATURE_SPACE(model))
-            # feature_detectors["Mahalanobis-att"] = fit_on_branch_outputs(Mahalanobis, ATTENDED_FEATURE_SPACE(model))
-            # feature_detectors["Mahalanobis-attinv"] = fit_on_branch_outputs(Mahalanobis, INVATTENDED_FEATURE_SPACE(model))
+            feature_detectors["Mahalanobis-raw"] = fit_on_branch_outputs(Mahalanobis, RAW_FEATURE_SPACE(model))
+            feature_detectors["Mahalanobis-att"] = fit_on_branch_outputs(Mahalanobis, ATTENDED_FEATURE_SPACE(model))
+            feature_detectors["Mahalanobis-attinv"] = fit_on_branch_outputs(Mahalanobis, INVATTENDED_FEATURE_SPACE(model))
             feature_detectors["Mahalanobis-attinvmaxnorm"] = fit_on_branch_outputs(Mahalanobis, INVATTENDED_FEATURE_SPACE(model))
-            # feature_detectors["Mahalanobis-trans"] = fit_on_branch_outputs(Mahalanobis, TRANSFORMED_FEATURE_SPACE(model))
+            feature_detectors["Mahalanobis-trans"] = fit_on_branch_outputs(Mahalanobis, TRANSFORMED_FEATURE_SPACE(model))
 
         else:
             raise NotImplementedError

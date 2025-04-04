@@ -45,6 +45,12 @@ def main(args):
         # the metric is reset before every  new detection task
         for (task_name, inputs_loader),dataset in zip(dataloaders.items(),datasets):
             filenames = dataset.patient_data['case_id'][:len(inputs_loader)]
+            
+            features_to_TSNE(loader = inputs_loader, filenames = filenames, 
+                            model = RAW_FEATURE_SPACE(model),
+                            task = task_name,experiment = args.exp_code, 
+                            label_dict = {v:k for (k,v) in dataset.label_dict.items()},split = args.split, extra_label = "raw_mean")
+            
             features_to_TSNE(loader = inputs_loader, filenames = filenames, 
                             model = INVATTENDED_FEATURE_SPACE(model),
                             task = task_name,experiment = args.exp_code, 
@@ -65,10 +71,7 @@ def main(args):
                             task = task_name,experiment = args.exp_code, 
                             label_dict = {v:k for (k,v) in dataset.label_dict.items()},split = args.split, extra_label = "transformed_mean")
             
-            features_to_TSNE(loader = inputs_loader, filenames = filenames, 
-                            model = RAW_FEATURE_SPACE(model),
-                            task = task_name,experiment = args.exp_code, 
-                            label_dict = {v:k for (k,v) in dataset.label_dict.items()},split = args.split, extra_label = "raw_mean")
+
             
             
 

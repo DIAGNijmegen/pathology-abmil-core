@@ -8,3 +8,4 @@ pip3 install wandb
 pip3 install pytorch-ood
 pip3 install plotly
 pip3 install bs4
+pip3 install umap-learn

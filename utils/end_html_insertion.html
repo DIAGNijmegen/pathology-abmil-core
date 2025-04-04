@@ -71,10 +71,10 @@
   
             // Update only the specific point (arrIndex, subIndex)
             let updateDataArr = plotData[arrIndex];
-            updateDataArr.marker.line.color[subIndex] = 'black';
-            updateDataArr.marker.line.width[subIndex] = 1 ;
+            // updateDataArr.marker.line.color[subIndex] = 'black';
+            // updateDataArr.marker.line.width[subIndex] = 1 ;
             updateDataArr.marker.size[subIndex] = 30 ;
-            updateDataArr.marker.opacity[subIndex] = 0.5 ;
+            // updateDataArr.marker.opacity[subIndex] = 0.5 ;
 
             plotData[arrIndex] = updateDataArr ;
             Plotly.restyle(graphDiv, plotData[arrIndex],[arrIndex]);
