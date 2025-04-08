@@ -325,43 +325,48 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 
 
 	def __getitem__(self, idx):
-		slide_id = self.slide_data['slide_id'][idx]
-		label = self.slide_data['label'][idx]
-		if type(self.data_dir) == dict:
-			source = self.slide_data['source'][idx]
-			data_dir = self.data_dir[source]
-		else:
-			data_dir = self.data_dir
+		try:
+			slide_id = self.slide_data['slide_id'][idx]
+			label = self.slide_data['label'][idx]
+			if self.datatype:
+				datatype = self.datatype
+			else:
+				datatype = self.datatypes[idx]
 
-		if self.datatype == "pt":
-			if self.data_dir:
-				full_path = os.path.join(data_dir, '{}.pt'.format(slide_id))
-				# full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))
+
+			if type(self.data_dir) == dict:
+				source = self.slide_data['source'][idx]
+				data_dir = self.data_dir[source]
+			else:
+				data_dir = self.data_dir
+
+			if datatype == "pt":
+				full_path = os.path.join(data_dir, slide_id)
 				features = torch.load(features)
 				return features, label
-			
-			else:
-				return slide_id, label
+				
 
-		elif self.datatype == "npy":
-			full_path = os.path.join(data_dir, '{}.npy'.format(slide_id))
-			features = np.load(full_path)
-			features = torch.from_numpy(features)
-			return features, label
+			elif datatype == "npy":
+				full_path = os.path.join(data_dir, slide_id)
+				features = np.load(full_path)
+				features = torch.from_numpy(features)
+				return features, label
 
 
-		elif self.use_h5:
-			full_path = os.path.join(data_dir,'h5_files','{}.h5'.format(slide_id))
-			with h5py.File(full_path,'r') as hdf5_file:
-				features = hdf5_file['features'][:]
-				coords = hdf5_file['coords'][:]
+			elif datatype == "h5":
+				full_path = os.path.join(data_dir, slide_id)
+				with h5py.File(full_path,'r') as hdf5_file:
+					features = hdf5_file['features'][:]
+					coords = hdf5_file['coords'][:]
 
-			features = torch.from_numpy(features)
-			return features, label, coords
-
+				features = torch.from_numpy(features)
+				return features, label, coords
+		except:
+			print(slide_id, self.datatype)
+			print(self.slide_data.iloc[0]["slide_id"].split(".")[-1])
 
 class Generic_Split(Generic_MIL_Dataset):
-	def __init__(self, slide_data, data_dir=None, num_classes=2,datatype=None):
+	def __init__(self, slide_data, data_dir="", num_classes=2,datatype=None):
 		self.use_h5 = False
 		self.slide_data = slide_data
 		self.data_dir = data_dir
@@ -369,6 +374,8 @@ class Generic_Split(Generic_MIL_Dataset):
 		self.slide_cls_ids = [[] for i in range(self.num_classes)]
 		for i in range(self.num_classes):
 			self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
+
+		self.datatypes = self.slide_data["slide_id"].apply(lambda x: x.split(".")[-1])
 		self.datatype = datatype
 
 	def __len__(self):

@@ -28,9 +28,9 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 		patient_strat=False,
 		label_col = None,
 		patient_voting = 'max',
-		datatype="h5",
+		datatype=None,
 		validate_inputs  = False,
-		data_dir = None
+		data_dir = "",
 		):
 		"""
 		Args:
@@ -56,7 +56,7 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 		self.train_ids, self.val_ids, self.test_ids  = (None, None, None)
 		self.validate_inputs = validate_inputs
 
-		slide_data = pd.read_csv(csv_path)
+		slide_data = pd.read_csv(csv_path,dtype=str)
 		slide_data = self.df_prep(slide_data, self.label_dict, ignore, self.label_col)
 		if shuffle:
 			np.random.seed(seed)
@@ -99,20 +99,24 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 	def df_prep(self,data, label_dict, ignore, label_col,check_func=None):
 		if label_col != 'label':
 			data['label'] = data[label_col].copy()
-
+		
 		mask = data['label'].isin(ignore)
 		data = data[~mask]
 		data.reset_index(drop=True, inplace=True)
 		if self.validate_inputs:
 			print("validating inputs..")
+			data["slide_id"] = data["slide_id"].apply(lambda x:
+						x.replace("internal(OBSOLETE because of temporary name. Use pa_cpgarchive)","internal")
+					)
 			mask =  data['slide_id'].apply(lambda x: self.check_exists(x))
+			data[~mask]['slide_id'].to_csv("/data/temporary/ivan/DeepDerma/OOD/splits/invalid_files.csv",index=False)
 			data = data[mask]
-			data.reset_index(drop=True, inplace=True)
 
+			data.reset_index(drop=True, inplace=True)
 		for i in data.index:
 			key = data.loc[i, 'label']
 			data.at[i, 'label'] = label_dict[key]
-
+		
 		return data
 	
 	
@@ -127,26 +131,18 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 		for i in range(self.num_classes):
 			self.slide_cls_ids[i] = np.where(self.slide_data['label'] == self.class_ids[i])[0]
 
-	def check_exists(self,case_id):
-		if self.datatype == "pt":
-			full_path = os.path.join(self.data_dir, '{}.pt'.format(case_id))
-
-		elif self.datatype == "npy":
-			full_path = os.path.join(self.data_dir, '{}.npy'.format(case_id))
-
-		elif self.datatype == "h5":
-			full_path = os.path.join(self.data_dir,'h5_files','{}.h5'.format(case_id))
-
+	def check_exists(self,full_path):
+		
 		return os.path.exists(full_path)
 
 	def get_merged_split_from_df(self, all_splits, split_keys=['train']):
 		merged_split = []
 		for split_key in split_keys:
 			split = all_splits[split_key]
-			split = split.dropna().reset_index(drop=True).tolist()
-			merged_split.extend(split)
-
-		if len(split) > 0:
+			if len(split) > 0:
+				split = split.dropna().reset_index(drop=True).tolist()
+				merged_split.extend(split)
+		if len(merged_split) > 0:
 			mask = self.slide_data['case_id'].isin(merged_split)
 			df_slice = self.slide_data[mask].reset_index(drop=True)
 			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
@@ -156,13 +152,18 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 		return split
 	
 
-	def return_splits(self, csv_path=None,merge_id_ood=False):
+	def return_splits(self, csv_path=None,merge_id_ood_for_projection=False):
 		# this should return:
 		# train,val, test split. where val split is 
 		assert csv_path 
+		if not csv_path:
+			return Generic_Split(self.slide_data, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
+		
 		all_splits = pd.read_csv(csv_path, dtype=self.slide_data['slide_id'].dtype)  # Without "dtype=self.slide_data['slide_id'].dtype", read_csv() will convert all-number columns to a numerical type. Even if we convert numerical columns back to objects later, we may lose zero-padding in the process; the columns must be correctly read in from the get-go. When we compare the individual train/val/test columns to self.slide_data['slide_id'] in the get_split_from_df() method, we cannot compare objects (strings) to numbers or even to incorrectly zero-padded objects/strings. An example of this breaking is shown in https://github.com/andrew-weisman/clam_analysis/tree/main/datatype_comparison_bug-2021-12-01.
+
 		train_split = self.get_split_from_df(all_splits, 'train')
-		if merge_id_ood:
+		if merge_id_ood_for_projection:
+			# merge train and test ood splits into 1 split
 			val_split = self.get_merged_split_from_df(all_splits, ['val','ood-val'])
 			test_split = self.get_merged_split_from_df(all_splits, ['test','ood-test'])
 			return train_split,val_split,test_split

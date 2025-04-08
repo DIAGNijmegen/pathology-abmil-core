@@ -41,6 +41,11 @@ os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 
 def loader_to_buffer(loader,model):
     buffer  = TensorBuffer()
+   
+    if len(loader) <= 0:
+        buffer = {"embedding": torch.tensor([]), "label": torch.tensor([])}
+        return buffer
+    
     with torch.no_grad():
         for batch in tqdm(loader,total=len(loader),ncols=50):
             x, y = batch
@@ -52,15 +57,20 @@ def loader_to_buffer(loader,model):
             z = z.view(z.shape[0], -1)  # flatten
             buffer.append("embedding", z)
             buffer.append("label", y)
-
     return buffer
 
-def dimred_dict_to_plot(projection_result,labels,qualityscores,subsets,color_mapping,task,experiment,filenames,label_dict,split=None,extra_label="",output="/data/temporary/ivan/DeepDerma/OOD/results/"):
-    qualityscores = np.array(qualityscores)
-    qualityscores[qualityscores<0] = np.max(qualityscores) # [-1,0.4,..,1] > [0.4,..,1]
-    qualityscores = np.array(qualityscores)*100 # [0.4,..,1] > [40,..,100]
-    artifact_magnitude = 100 - np.array(qualityscores) # [40,..,100]  > [60,,..,0] 
-    artifact_norm = artifact_magnitude * (1/artifact_magnitude.max()) # [1,0]
+def dimred_dict_to_plot(projection_result,labels,opacities,subsets,color_mapping,task,experiment,filenames,label_dict,split=None,extra_label="",output="/data/temporary/ivan/DeepDerma/OOD/results/"):
+    opacities = np.array(opacities)
+    opacities[[np.isnan(q) for q in opacities]] = 1.0
+    if len(np.unique(opacities)) == 1:
+        opacity_norm = opacities
+        opacity_magnitude = 100 - np.array(opacities)
+    else:
+        # we inver the opacities because the opacities are actually 
+        opacities[opacities<0] = np.max(opacities) # [-1,0.4,..,1] -> [1,0.4,..,1]
+        opacities = np.array(opacities)*100 # [0.4,..,1] -> [40,..,100]
+        opacity_magnitude = 100 - np.array(opacities) # [40,..,100]  -> [60,..,0] 
+        opacity_norm = opacity_magnitude * (1/opacity_magnitude.max()) #  [60,..,0]  -> [1.0,..,0]
 
     df_reduced = pd.DataFrame({
         "DIM-1": projection_result[:, 0],
@@ -72,16 +82,15 @@ def dimred_dict_to_plot(projection_result,labels,qualityscores,subsets,color_map
         "Symbol": ["circle" if lbl >= 0 else "square" for lbl in labels],
         "Size": [6] * len(labels),
         "Opacity": [0.8] * len(labels),
-        "ArtifactScore": [f"{f:.2f}" for f in artifact_magnitude],
-        "Qualityscore": [f"{qs:.2f}" for qs in qualityscores],
-        "OpacityArtifact": [(0.7 * afs)+0.2 for afs in artifact_norm] , 
+        "InvScore": [f"{f:.2f}" for f in opacity_magnitude],
+        "Score": [f"{qs:.2f}" for qs in opacities],
+        "OpacityArtifact": [(0.7 * afs)+0.2 for afs in opacity_norm] , 
         "Border": [False if _set == 0 else True for _set in subsets]
     })
 
     fig = go.Figure()
 
     for class_name, group in df_reduced.groupby("Class"):
-        print(len(group["PIDs"]), len(group["ArtifactScore"]))
         fig.add_trace(go.Scatter(
             x=group["DIM-1"],
             y=group["DIM-2"],
@@ -101,7 +110,7 @@ def dimred_dict_to_plot(projection_result,labels,qualityscores,subsets,color_map
             legendgroup=class_name,
             showlegend=False
         ))
-        # Dummy trace for legend (without black border)
+        # Dummy trace for legend, to have legend icons without black border
         fig.add_trace(go.Scatter(
             x=[None],  # Empty trace, only for legend
             y=[None],
@@ -134,7 +143,6 @@ def dimred_dict_to_plot(projection_result,labels,qualityscores,subsets,color_map
     fig.write_html(output_html)
 
     """" Insert HTML code for search functionality"""
-    print(os.getcwd())
     begin_body_file = "./utils/begin_html_insertion.html"
     end_body_file = "./utils/end_html_insertion.html"
 
@@ -167,7 +175,7 @@ def dimred_dict_to_plot(projection_result,labels,qualityscores,subsets,color_map
 
         print(f"Projection saved in: {output_html}")
 
-def dimred_features(loader_A, loader_B, filenames, qualityscores, model, task, experiment, label_dict=None, split=None, extra_label="", output="/data/temporary/ivan/DeepDerma/OOD/results/"):
+def dimred_features(loader_A, loader_B, filenames, opacities, model, task, experiment, label_dict=None, split=None, extra_label="", output="/data/temporary/ivan/DeepDerma/OOD/results/"):
     unique_classes = label_dict.values()
     color_palette = pc.qualitative.Light24  # Can be 'Set2', 'Dark24', 'Pastel', etc.
     color_mapping = {cls: color_palette[i % len(color_palette)] for i, cls in enumerate(unique_classes)}
@@ -181,11 +189,11 @@ def dimred_features(loader_A, loader_B, filenames, qualityscores, model, task, e
 
     # Perform TSNE
     projection_results = features_to_TSNE(aggregated_vectors_A, aggregated_vectors_B)
-    dimred_dict_to_plot(projection_results,labels,qualityscores,subsets, color_mapping, f"TSNE_{task}", experiment,filenames,label_dict, split, extra_label, output)
+    dimred_dict_to_plot(projection_results,labels,opacities,subsets, color_mapping, f"TSNE_{task}", experiment,filenames,label_dict, split, extra_label, output)
 
     # Perform UMAP
     projection_results = features_to_UMAP(aggregated_vectors_A,aggregated_vectors_B)
-    dimred_dict_to_plot(projection_results,labels,qualityscores,subsets, color_mapping, f"UMAP_{task}", experiment,filenames,label_dict, split, extra_label, output)
+    dimred_dict_to_plot(projection_results,labels,opacities,subsets, color_mapping, f"UMAP_{task}", experiment,filenames,label_dict, split, extra_label, output)
 
 
 def load_embeddings(loader, model):
@@ -205,14 +213,23 @@ def features_to_UMAP(aggregated_vectors_A, aggregated_vectors_B):
     
     # Fit UMAP on loader_A embeddings
     umap_model = umap.UMAP(n_components=2)
-    umap_model.fit(aggregated_vectors_A)
+
+    if (aggregated_vectors_B.shape[0] == 0) and (aggregated_vectors_A.shape[0] == 0):   
+        raise ValueError("Both loaders have no embeddings")
+    
+    elif aggregated_vectors_A.shape[0] == 0:
+        aggregated_vectors_A = np.reshape(aggregated_vectors_A,(0,aggregated_vectors_B.shape[1]))
+        umap_model.fit(aggregated_vectors_B)
+    elif aggregated_vectors_B.shape[0] == 0:
+        aggregated_vectors_B = np.reshape(aggregated_vectors_B,(0,aggregated_vectors_A.shape[1]))
+        umap_model.fit(aggregated_vectors_A)
+    else:
+        umap_model.fit(aggregated_vectors_A)
+
+    aggregated_vectors = np.concatenate((aggregated_vectors_A, aggregated_vectors_B), axis=0)
 
     # Transform loader_A and loader_B embeddings using fitted UMAP
-    umap_results_A = umap_model.transform(aggregated_vectors_A)
-    umap_results_B = umap_model.transform(aggregated_vectors_B)
-
-    # Concatenate results
-    umap_results = np.vstack((umap_results_A, umap_results_B))
+    umap_results = umap_model.transform(aggregated_vectors)
 
 
     return umap_results
@@ -221,10 +238,15 @@ def features_to_UMAP(aggregated_vectors_A, aggregated_vectors_B):
 def features_to_TSNE(aggregated_vectors_A, aggregated_vectors_B):
     print("TSNE: start \n")
     tsne = TSNE(n_components=2, random_state=42, n_jobs=-1)
-
     # Concatenate both A and B embeddings
-    aggregated_vectors = np.concatenate((aggregated_vectors_A, aggregated_vectors_B), axis=0)
+    if (aggregated_vectors_B.shape[0] == 0) and (aggregated_vectors_A.shape[0] == 0):   
+        raise ValueError("Both loaders have no embeddings")
+    elif aggregated_vectors_A.shape[0] == 0:
+        aggregated_vectors_A = np.reshape(aggregated_vectors_A,(0,aggregated_vectors_B.shape[1]))
+    elif aggregated_vectors_B.shape[0] == 0:
+        aggregated_vectors_B = np.reshape(aggregated_vectors_B,(0,aggregated_vectors_A.shape[1]))
 
+    aggregated_vectors = np.concatenate((aggregated_vectors_A, aggregated_vectors_B), axis=0)
     tsne_results = tsne.fit_transform(aggregated_vectors)
     return tsne_results
 

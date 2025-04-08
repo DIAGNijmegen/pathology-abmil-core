@@ -290,7 +290,7 @@ def precompute_logits(model,loader,loader_name, device,args,recompute=True):
     return DataLoader(dataset, batch_size=10, shuffle=False, sampler=None,
                     batch_sampler=None)
 
-def RAW_FEATURE_SPACE(model):
+def RAW_FEATURE_SPACE(model=None):
     return lambda x: aggregrate_patch_features(lambda y: y,x , transformed=False)
 def TRANSFORMED_FEATURE_SPACE(model):
     return lambda x: aggregrate_patch_features(lambda y: model._compute_attention(y),x, transformed=True,pool_attention=False)
