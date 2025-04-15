@@ -27,6 +27,7 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 		ignore=[],
 		patient_strat=False,
 		label_col = None,
+		slide_col = None,
 		patient_voting = 'max',
 		datatype=None,
 		validate_inputs  = False,
@@ -51,13 +52,16 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 		if not label_col:
 			label_col = 'label'
 		self.label_col = label_col
+		if not slide_col:
+			slide_col = 'slide_id'
+		self.slide_col = slide_col
 		self.print_info = print_info
 		self.patient_strat = patient_strat
 		self.train_ids, self.val_ids, self.test_ids  = (None, None, None)
 		self.validate_inputs = validate_inputs
 
 		slide_data = pd.read_csv(csv_path,dtype=str)
-		slide_data = self.df_prep(slide_data, self.label_dict, ignore, self.label_col)
+		slide_data = self.df_prep(slide_data, self.label_dict, ignore)
 		if shuffle:
 			np.random.seed(seed)
 			np.random.shuffle(slide_data)
@@ -96,16 +100,18 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 		
 		self.patient_data = {'case_id':patients, 'label':np.array(patient_labels)}
 
-	def df_prep(self,data, label_dict, ignore, label_col,check_func=None):
-		if label_col != 'label':
-			data['label'] = data[label_col].copy()
-		
+	def df_prep(self,data, label_dict, ignore, check_func=None):
+		if self.label_col != 'label':
+			data['label'] = data[self.label_col].copy()
+		if self.slide_col != 'slide_id':
+			data['slide_id'] = data[self.slide_col].copy()
+
 		mask = data['label'].isin(ignore)
 		data = data[~mask]
 		data.reset_index(drop=True, inplace=True)
 		if self.validate_inputs:
 			print("validating inputs..")
-			data["slide_id"] = data["slide_id"].apply(lambda x:
+			data.loc[:,"slide_id"] = data["slide_id"].apply(lambda x:
 						x.replace("internal(OBSOLETE because of temporary name. Use pa_cpgarchive)","internal")
 					)
 			mask =  data['slide_id'].apply(lambda x: self.check_exists(x))
@@ -162,6 +168,7 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 		all_splits = pd.read_csv(csv_path, dtype=self.slide_data['slide_id'].dtype)  # Without "dtype=self.slide_data['slide_id'].dtype", read_csv() will convert all-number columns to a numerical type. Even if we convert numerical columns back to objects later, we may lose zero-padding in the process; the columns must be correctly read in from the get-go. When we compare the individual train/val/test columns to self.slide_data['slide_id'] in the get_split_from_df() method, we cannot compare objects (strings) to numbers or even to incorrectly zero-padded objects/strings. An example of this breaking is shown in https://github.com/andrew-weisman/clam_analysis/tree/main/datatype_comparison_bug-2021-12-01.
 
 		train_split = self.get_split_from_df(all_splits, 'train')
+
 		if merge_id_ood_for_projection:
 			# merge train and test ood splits into 1 split
 			val_split = self.get_merged_split_from_df(all_splits, ['val','ood-val'])
@@ -170,9 +177,12 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 		else:
 			val_split = self.get_split_from_df(all_splits, 'val')
 			test_split = self.get_split_from_df(all_splits, 'test')
-			test_ood_split = self.get_split_from_df(all_splits, 'ood-test')
-			val_ood_split = self.get_split_from_df(all_splits, 'ood-val')
-			return train_split, val_split, test_split, test_ood_split, val_ood_split
+			if "ood-test" in all_splits.columns:				# merge train and test ood splits into 1 split
+				test_ood_split = self.get_split_from_df(all_splits, 'ood-test')
+				val_ood_split = self.get_split_from_df(all_splits, 'ood-val')
+				return train_split, val_split, test_split, test_ood_split, val_ood_split
+			else:
+				return train_split, val_split,test_split
 
 	def get_split_from_df(self, all_splits, split_key='train'):
 		split = all_splits[split_key]
@@ -182,7 +192,8 @@ class WSI_OODDetection_Dataset(Generic_MIL_Dataset):
 			df_slice = self.slide_data[mask].reset_index(drop=True)
 			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
 		else:
-			split = None
+			df_slice = self.slide_data.iloc[:0].copy()
+			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
 		
 		return split
 	

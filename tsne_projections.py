@@ -1,25 +1,18 @@
 import os
 import sys
 import argparse
+import torch
 
 from utils.ood_detection import RAW_FEATURE_SPACE, TRANSFORMED_FEATURE_SPACE, ATTENDED_FEATURE_SPACE, INVATTENDED_FEATURE_SPACE,INVMAXNORMATTENDED_FEATURE_SPACE
-from utils.projections import dimred_features
-from utils.utils import *
+from utils.projections import make_projections
 from utils.core_utils import get_pretrained_model
 
 from dataset_modules.dataset_ood import WSI_OODDetection_Dataset
 from pathlib import Path
-import torch
+from utils.utils import get_split_loader
+import numpy as np
 
-def merge_loader_attributes(_content_items):
-    _result = []
-    for _content in _content_items:
-        try:
-            if len(_content) > 0:
-                _result.extend(_content)
-        except:
-            pass
-    return _result
+
 
 
 def main(args):
@@ -47,20 +40,19 @@ def main(args):
         print("not using a pretrained classifier")
         model = None
     """ Prepare the required components """
-
-    # dataloaders  = {}
-    # for task_name, task_dataset in zip(args.tasks,datasets):
-    #     train_dataset, val_dataset, test_dataset = dataset.return_splits(from_id=False, 
-    #             csv_path='{}/splits_{}.csv'.format(args.split_dir, i))
-    #     dataloaders[task_name] = get_split_loader(task_dataset, training=False,testing = args.testing)
-
     test_dataloaders  = {}
     train_dataloaders = {}
     for task_name,task_dataset in zip(args.tasks,datasets):
         print(f"creating dataloader for dataset with {len(task_dataset.slide_data)} samples")
-        train_split, val_split, test_split = task_dataset.return_splits(csv_path=Path(f"{args.split_dir}_{args.fold_nr}.csv"),merge_id_ood_for_projection=True)
+        try:
+            train_split, val_split, test_split = task_dataset.return_splits(csv_path=Path(args.split_file),merge_id_ood_for_projection=True)
+        except KeyError:
+            train_split, val_split, test_split = task_dataset.return_splits(csv_path=Path(args.split_file),merge_id_ood_for_projection=False) 
+
         train_dataloaders[task_name] = get_split_loader(train_split,testing=args.testing, training=False)
         test_dataloaders[task_name] = get_split_loader(val_split,testing=args.testing, training=False)
+
+
     print("dataloaders are prepared")
 
     if args.testing:
@@ -69,52 +61,32 @@ def main(args):
     """ Run OOD detection """   
     with torch.no_grad():
         for (task_name, train_inputs),test_inputs,dataset in zip(train_dataloaders.items(),test_dataloaders.values(),datasets):
-            train_filenames = list(train_inputs.dataset.slide_data['slide_id'][list(train_inputs.sampler)])
-            test_filenames = list(test_inputs.dataset.slide_data['slide_id'][list(test_inputs.sampler)]) 
-            filenames =  merge_loader_attributes([train_filenames, test_filenames])
-            validity_label = args.opacity_label
-            train_validity = list(train_inputs.dataset.slide_data[validity_label][list(train_inputs.sampler)]) 
-            test_validity = list(test_inputs.dataset.slide_data[validity_label][list(test_inputs.sampler)])
-            validities = merge_loader_attributes([train_validity,test_validity])
-            if len(validities) <= len(filenames):
-                validities = [1.0]*len(filenames)
-
             label_dict = {v:k for (k,v) in dataset.label_dict.items()}
-            dimred_features(loader_A = train_inputs,loader_B=test_inputs, filenames = filenames, opacities=validities, 
+            make_projections(loader_A = train_inputs,loader_B=test_inputs, 
                             model = RAW_FEATURE_SPACE(model),
-                            task = task_name,experiment = args.exp_code, 
-                            output = args.projections_results_dir,
-                            label_dict = label_dict,
+                            task = task_name, label_dict = label_dict, args = args,
                             split = "trainval", extra_label = "raw_mean")
             
 
             if model is not None:
-                dimred_features(loader_A = train_inputs,loader_B=test_inputs, filenames = filenames, opacities=validities, 
+                make_projections(loader_A = train_inputs,loader_B=test_inputs,
                                 model = TRANSFORMED_FEATURE_SPACE(model),
-                                task = task_name,experiment = args.exp_code, 
-                                output = args.projections_results_dir,
-                                label_dict = label_dict,
+                                task = task_name, label_dict = label_dict, args = args,
                                 split = "trainval", extra_label = "transformed_mean")
                 
-                dimred_features(loader_A = train_inputs,loader_B=test_inputs, filenames = filenames, opacities=validities, 
+                make_projections(loader_A = train_inputs,loader_B=test_inputs, 
                                 model = ATTENDED_FEATURE_SPACE(model),
-                                task = task_name,experiment = args.exp_code, 
-                                output = args.projections_results_dir,
-                                label_dict = label_dict,
+                                task = task_name, label_dict = label_dict, args = args,
                                 split = "trainval", extra_label = "transformed_attention")
 
-                dimred_features(loader_A = train_inputs,loader_B=test_inputs, filenames = filenames, opacities=validities, 
-                            model = INVATTENDED_FEATURE_SPACE(model),
-                            task = task_name,experiment = args.exp_code, 
-                            output = args.projections_results_dir,
-                            label_dict = label_dict,
-                            split = "trainval", extra_label = "attention_inv")
+                make_projections(loader_A = train_inputs,loader_B=test_inputs, 
+                                model = INVATTENDED_FEATURE_SPACE(model),
+                                task = task_name, label_dict = label_dict, args = args,
+                                split = "trainval", extra_label = "attention_inv")
 
-                dimred_features(loader_A = train_inputs,loader_B=test_inputs, filenames = filenames, opacities=validities, 
+                make_projections(loader_A = train_inputs,loader_B=test_inputs, 
                                 model = INVMAXNORMATTENDED_FEATURE_SPACE(model),
-                                task = task_name,experiment = args.exp_code, 
-                                output = args.projections_results_dir,
-                                label_dict = label_dict,
+                                task = task_name, label_dict = label_dict, args = args,
                                 split = "trainval", extra_label = "attention_invmaxnorm")
 
 
@@ -142,25 +114,33 @@ def seed_torch(seed=7):
 parser = argparse.ArgumentParser(description='Configurations for WSI Training')
 parser.add_argument('--data_root_dir', type=str, default="", 
                     help='data directory')
-parser.add_argument('--embed_dim', type=int, default=1024)
-parser.add_argument('--seed', type=int, default=1, 
-                    help='random seed for reproducible experiment (default: 1)')
+# data options
 parser.add_argument('--classifier_results_dir', default='', help='')
 parser.add_argument('--projections_results_dir', default='', help='')
+parser.add_argument('--exp_code', type=str, default=None, help='experiment code for saving results')
 parser.add_argument('--testing', action='store_true', default=False, help='debugging tool')
-parser.add_argument('--opt', type=str, choices = ['adam', 'sgd'], default='adam')
-parser.add_argument('--drop_out', type=float, default=0.25, help='dropout')
-parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mil', 'addmil'], default='clam_sb', 
-                    help='type of model (default: clam_sb, clam w/ single attention branch)')
-parser.add_argument('--exp_code', type=str, help='experiment code for saving results')
-parser.add_argument('--weighted_sample', action='store_true', default=False, help='enable weighted sampling')
-parser.add_argument('--model_size', type=str, choices=['small', 'big'], default='small', help='size of model, does not affect mil')
 parser.add_argument('--tasks', nargs="*")
+parser.add_argument('--split_file', type=str, default=None, 
+                    help='manually specify the set of splits to use, ' 
+                    +'instead of infering from the task and label_frac argument (default: None)')
 parser.add_argument('--split_dir', type=str, default=None, 
                     help='manually specify the set of splits to use, ' 
                     +'instead of infering from the task and label_frac argument (default: None)')
 parser.add_argument('--fold_nr', type=int, default=0, help='the fold. dictates data fold and model trained on fold')
-parser.add_argument('--opacity_label', type=str, default="quality-score")
+parser.add_argument('--label_col',type=str,default="label")
+parser.add_argument('--slide_col',type=str,default="slide_id")
+
+# model options
+parser.add_argument('--embed_dim', type=int, default=1024)
+parser.add_argument('--seed', type=int, default=1, 
+                    help='random seed for reproducible experiment (default: 1)')
+parser.add_argument('--opt', type=str, choices = ['adam', 'sgd'], default='adam')
+parser.add_argument('--drop_out', type=float, default=0.25, help='dropout')
+parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mil', 'addmil'], default='addmil', 
+                    help='type of model (default: clam_sb, clam w/ single attention branch)')
+parser.add_argument('--weighted_sample', action='store_true', default=False, help='enable weighted sampling')
+parser.add_argument('--model_size', type=str, choices=['small', 'big'], default='small', help='size of model, does not affect mil')
+
 ### CLAM specific options
 parser.add_argument('--no_inst_cluster', action='store_true', default=False,
                      help='disable instance-level clustering')
@@ -171,7 +151,19 @@ parser.add_argument('--subtyping', action='store_true', default=False,
 parser.add_argument('--B', type=int, default=8, help='number of positive/negative patches to sample for clam')
 parser.add_argument('--data_label_csv_path', type=str, default=None, help='data label directory') 
 parser.add_argument('--datatype', type=str, default=None, help='data type',choices=[None,"npy","h5","pt"])    
+# plotting options
+parser.add_argument('--opacity_label', type=str, default=None)
+parser.add_argument("--class_tag",type=str,choices=["distribution","cluster","label","split","cohort","scanner"],default="label")
+parser.add_argument("--color_tag",type=str,choices=["distribution","cluster","label","split","cohort","scanner"],default="label")
+parser.add_argument("--symbol_tag",type=str,choices=["distribution","cluster","label","split","cohort","scanner"],default="distribution")
+parser.add_argument("--border_tag",type=str,choices=["distribution","split","cohort","scanner"],default=None)
+
+
+
 args = parser.parse_args()
+
+if not args.split_file:
+    args.split_file = f"{args.split_dir}_{args.fold_nr}.csv"
 
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # device = "cpu"
@@ -194,6 +186,8 @@ for task in args.tasks:
                 shuffle = False, 
                 seed = args.seed, 
                 print_info = False,
+                slide_col = args.slide_col,
+                label_col = args.label_col,
                 label_dict = {
                     "scc": 0,
                     "cscc": -1,
@@ -226,6 +220,8 @@ for task in args.tasks:
                 shuffle = False, 
                 seed = args.seed, 
                 print_info = False,
+                slide_col = args.slide_col,
+                label_col = args.label_col,
                 label_dict = {
                     "normal": -1,
                     "bcc": -2,
@@ -258,6 +254,8 @@ for task in args.tasks:
                 shuffle = False, 
                 seed = args.seed, 
                 print_info = False,
+                slide_col = args.slide_col,
+                label_col = args.label_col,
                 label_dict ={
                     "normal": 0,
                     "bccood": 1, 
@@ -290,6 +288,8 @@ for task in args.tasks:
                 shuffle = False, 
                 seed = args.seed, 
                 print_info = False,
+                slide_col = args.slide_col,
+                label_col = args.label_col,
                 label_dict = {
                     "normal": 0,
                     "bcc": 1,
@@ -322,6 +322,8 @@ for task in args.tasks:
                 shuffle = False, 
                 seed = args.seed, 
                 print_info = False,
+                slide_col = args.slide_col,
+                label_col = args.label_col,
                 label_dict ={
                     "normal": 0,
                     "bcc": 1,
@@ -353,6 +355,8 @@ for task in args.tasks:
                 shuffle = False, 
                 seed = args.seed, 
                 print_info = False,
+                slide_col = args.slide_col,
+                label_col = args.label_col,
                 label_dict ={
                     "normal": 0,
                     "bccood": 1, 
@@ -379,6 +383,61 @@ for task in args.tasks:
                 datatype=args.datatype,
                 validate_inputs = True)
 
+    elif task == 'tumor_patches_vs_no_tumor_patches':
+        ood_detection_dataset = WSI_OODDetection_Dataset(csv_path= args.data_label_csv_path , 
+                shuffle = False, 
+                seed = args.seed, 
+                print_info = False,
+                slide_col = args.slide_col,
+                label_col = args.label_col,
+                label_dict = {
+                    "cobra_benign": 0,
+                    "scc_notumor": 1,
+                    "cscc_notumor": 2,
+                } , # label cobra as 1 , other as -1
+                patient_strat= False,
+                ignore=[
+                ], # ignore everything but normal, cscc, bcc
+                datatype=args.datatype,
+                validate_inputs = True)
+
+
+    elif task == 'scanner_scc_vs_cscc_vs_cobrabenign':
+        ood_detection_dataset = WSI_OODDetection_Dataset(csv_path= args.data_label_csv_path , 
+                shuffle = False, 
+                seed = args.seed, 
+                print_info = False,
+                slide_col = args.slide_col,
+                label_col = args.label_col,
+                label_dict = {
+                    "cobra_ood": 0,
+                    "S1": 1,
+                    "S2": 2,
+                    "S3": 3,
+                    "cobra": 4,
+                } , # label cobra as 1 , other as -1
+                patient_strat= False,
+                ignore=[
+                ], # ignore everything but normal, cscc, bcc
+                datatype=args.datatype,
+                validate_inputs = True)
+
+    elif task == 'artifact_vs_normal':
+        ood_detection_dataset = WSI_OODDetection_Dataset(csv_path= args.data_label_csv_path , 
+                shuffle = False, 
+                seed = args.seed, 
+                print_info = False,
+                slide_col = args.slide_col,
+                label_col = args.label_col,
+                label_dict = {
+                    "0": 0,
+                    "1": 1,
+                } , # label cobra as 1 , other as -1
+                patient_strat= False,
+                ignore=[
+                ], # ignore everything but normal, cscc, bcc
+                datatype=args.datatype,
+                validate_inputs = True)
     else:
         raise NotImplementedError
     datasets.append(ood_detection_dataset )

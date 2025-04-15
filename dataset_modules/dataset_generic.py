@@ -342,7 +342,7 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 
 			if datatype == "pt":
 				full_path = os.path.join(data_dir, slide_id)
-				features = torch.load(features)
+				features = torch.load(full_path)
 				return features, label
 				
 
@@ -361,8 +361,9 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 
 				features = torch.from_numpy(features)
 				return features, label, coords
-		except:
-			print(slide_id, self.datatype)
+		except Exception as e:
+			print(e)
+			print(data_dir, slide_id, self.datatype)
 			print(self.slide_data.iloc[0]["slide_id"].split(".")[-1])
 
 class Generic_Split(Generic_MIL_Dataset):

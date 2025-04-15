@@ -11,29 +11,17 @@ from utils.utils import *
 
 # pytorch imports
 import torch
-from torch import Tensor, logsumexp
+from torch import Tensor
 from torch.utils.data import DataLoader,  TensorDataset
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-
-import pandas as pd
-import numpy as np
 from tqdm import tqdm
 
 # ood detection imports
 from pytorch_ood.detector import EnergyBased, MaxSoftmax, MaxLogit, Entropy, ODIN, Mahalanobis, RMD, KLMatching, SHE, DICE, MCD, TemperatureScaling, OpenMax, KNN
-from pytorch_ood.utils import OODMetrics, TensorBuffer, contains_unknown, is_known,  is_unknown
-from bs4 import BeautifulSoup
-import umap
-
-from sklearn.manifold import TSNE
-import plotly.express as px
-import plotly.graph_objects as go
-import plotly.colors as pc
-from datetime import datetime
+from pytorch_ood.utils import  TensorBuffer,  is_known
 
 os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 ***REMOVED***

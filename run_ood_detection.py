@@ -5,7 +5,7 @@ log = logging.getLogger(__name__)
 from pathlib import Path
 
 # internal imports
-from utils.utils import *
+from utils.utils import get_split_loader
 from utils.core_utils import get_pretrained_model
 from dataset_modules.dataset_ood import WSI_OODDetection_Dataset
 
@@ -22,7 +22,6 @@ from tqdm import tqdm
 
 # ood detection imports
 
-from pytorch_ood.api import RequiresFittingException
 from pytorch_ood.utils import OODMetrics
 
 from utils.ood_detection import precompute_logits, prepare_ood_detectors
