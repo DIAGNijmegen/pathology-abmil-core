@@ -86,7 +86,7 @@ def summary(model, loader, args):
         # Convert Y_hat to tensor if it is not already
         if not isinstance(Y_hat, torch.Tensor):
             Y_hat = torch.tensor(Y_hat, device=device)
-        print("Y_hat: ", Y_hat)
+        
         acc_logger.log(Y_hat, label)
         
         probs = Y_prob.cpu().numpy()
