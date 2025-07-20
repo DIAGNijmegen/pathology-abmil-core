@@ -21,12 +21,14 @@ parser = argparse.ArgumentParser(description='CLAM Evaluation Script')
 parser.add_argument('--data_root_dir', type=str, default=None,
                     help='data directory')
 parser.add_argument('--results_dir', type=str, default='./results',
-                    help='relative path to results folder, i.e. '+
+                    help='absolute path to results folder, i.e. '+
                     'the directory containing models_exp_code relative to project root (default: ./results)')
+parser.add_argument('--models_dir', type=str, default=None,
+                    help='absolute path to models folder')
 parser.add_argument('--save_exp_code', type=str, default=None,
                     help='experiment code to save eval results')
-parser.add_argument('--models_exp_code', type=str, default=None,
-                    help='experiment code to load trained models (directory under results_dir containing model checkpoints')
+# parser.add_argument('--models_exp_code', type=str, default=None,
+#                     help='experiment code to load trained models (directory under results_dir containing model checkpoints')
 parser.add_argument('--splits_dir', type=str, default=None,
                     help='splits directory, if using custom splits other than what matches the task (default: None)')
 parser.add_argument('--model_size', type=str, choices=['small', 'big'], default='small', 
@@ -50,7 +52,7 @@ args = parser.parse_args()
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 args.save_dir = os.path.join(args.results_dir, 'EVAL_' + str(args.save_exp_code))
-args.models_dir = os.path.join(args.results_dir, str(args.models_exp_code))
+#args.models_dir = os.path.join(args.results_dir, str(args.models_exp_code))
 
 os.makedirs(args.save_dir, exist_ok=True)
 
@@ -71,7 +73,7 @@ settings = {'task': args.task,
 with open(args.save_dir + '/eval_experiment_{}.txt'.format(args.save_exp_code), 'w') as f:
     print(settings, file=f)
 f.close()
-
+print("Settings: ")
 print(settings)
 if args.task == 'task_1_tumor_vs_normal':
     args.n_classes=2
