@@ -19,7 +19,7 @@ def initiate_model(args, ckpt_path, device='cuda'):
     print('Init Model')    
     model_dict = {"dropout": args.drop_out, 'n_classes': args.n_classes, "embed_dim": args.embed_dim}
     
-    if args.model_size is not None and args.model_type in ['clam_sb', 'clam_mb']:
+    if args.model_size is not None and args.model_type in ['clam_sb', 'clam_mb', 'addmil']:
         model_dict.update({"size_arg": args.model_size})
     
     if args.model_type =='clam_sb':
@@ -51,7 +51,7 @@ def initiate_model(args, ckpt_path, device='cuda'):
 
 def eval(dataset, args, ckpt_path):
     model = initiate_model(args, ckpt_path)
-    
+    print('Model loaded from: ', ckpt_path)
     print('Init Loaders')
     loader = get_simple_loader(dataset)
     patient_results, test_error, auc, df, _ = summary(model, loader, args)
@@ -74,9 +74,19 @@ def summary(model, loader, args):
     for batch_idx, (data, label) in enumerate(loader):
         data, label = data.to(device), label.to(device)
         slide_id = slide_ids.iloc[batch_idx]
-        with torch.no_grad():
-            logits, Y_prob, Y_hat, _, results_dict = model(data)
         
+        with torch.no_grad():
+            if isinstance(model, (CLAM_SB, CLAM_MB)):
+                logits, Y_prob, Y_hat, _, results_dict = model(data)
+            elif isinstance(model, (AttentionSingleBranch,AttentionMultiBranch)):
+                logits, att_raw, results_dict = model(data) 
+                Y_hat = torch.topk(logits, 1, dim = 1)[1].item() 
+                Y_prob = F.softmax(logits, dim = 1)
+        
+        # Convert Y_hat to tensor if it is not already
+        if not isinstance(Y_hat, torch.Tensor):
+            Y_hat = torch.tensor(Y_hat, device=device)
+        print("Y_hat: ", Y_hat)
         acc_logger.log(Y_hat, label)
         
         probs = Y_prob.cpu().numpy()
