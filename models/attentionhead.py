@@ -114,7 +114,7 @@ class AttentionSingleBranch(nn.Module):
         size_arg = "small", 
         #size: tuple[int, int, int] | None = None,
         # use_dropout: bool = False,
-        dropout: bool = False,
+        dropout: float = 0.25,
         n_classes: int = 2,
         additive: bool = False,
         embed_dim=1024
@@ -130,8 +130,8 @@ class AttentionSingleBranch(nn.Module):
         self.n_classes = n_classes
 
         fc = [nn.Linear(size[0], size[1]), nn.ReLU()]
-        if dropout:
-            fc.append(nn.Dropout(0.25))
+        #if dropout:
+        fc.append(nn.Dropout(dropout)) # Changed to using dropout probability instead of boolean flag to keep the layer consistent in eval and training
         attention_net = GatedAttention(input_dim=size[1], bottleneck_dim=size[2], dropout=dropout, n_branches=1)
         fc.append(attention_net)
         self.attention_net = nn.Sequential(*fc)
@@ -242,7 +242,7 @@ class AttentionMultiBranch(AttentionSingleBranch):
         self,
         #size: tuple[int, int, int] | None = None,
         size= None,
-        use_dropout: bool = False,
+        dropout: float = 0.25,
         n_classes: int = 2,
         additive: bool = False,
     ):
@@ -254,13 +254,12 @@ class AttentionMultiBranch(AttentionSingleBranch):
         self.n_classes = n_classes
 
         fc = [nn.Linear(size[0], size[1]), nn.ReLU()]
-        if use_dropout:
-            fc.append(nn.Dropout(0.25))
+        fc.append(nn.Dropout(dropout)) 
 
         attention_net = GatedAttention(
             input_dim=size[1],
             bottleneck_dim=size[2],
-            dropout=use_dropout,
+            dropout=dropout,
             n_branches=n_classes,
         )
 
