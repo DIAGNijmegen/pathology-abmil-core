@@ -1,9 +1,48 @@
-@software{cchia_2024,
-  author = {Catherine Chia, Stephan Dooper, Geert Litjens},
-  doi = {000},
-  month = {1},
-  title = {{CLAM integrated with Additive MIL}},
-  url = {https://github.com/DIAGNijmegen/pathology-clam-addmil},
-  version = {0.0.1},
-  year = {2024}
-}
+cff-version: 1.2.0
+message: "If you use this repository, please cite the associated manuscript."
+title: "CLAM and Additive MIL for Automated Detection of Cutaneous Squamous Cell Carcinoma in Whole Slide Images"
+type: software
+
+authors:
+  - family-names: Chia
+    given-names: Catherine
+  - family-names: Dooper
+    given-names: Stephan
+  - family-names: Mooyaart
+    given-names: Antien
+  - family-names: Amir
+    given-names: Avital
+  - family-names: Wakkee
+    given-names: Marlies
+  - family-names: Litjens
+    given-names: Geert
+
+repository-code: "https://github.com/DIAGNijmegen/pathology-clam-addmil"
+
+abstract: >
+  Implementation of CLAM integrated with Additive Multiple Instance Learning
+  for automated detection of cutaneous squamous cell carcinoma (CSCC) in
+  whole slide images of skin biopsies using weakly-supervised learning.
+
+keywords:
+  - digital pathology
+  - weakly supervised learning
+  - multiple instance learning
+  - CLAM
+  - Additive MIL
+  - computational pathology
+  - skin cancer
+  - CSCC
+
+license: MIT
+version: 0.1.0
+date-released: 2026-03-06
+
+references:
+  - type: software
+    title: "CLAM: Clustering-constrained Attention Multiple Instance Learning"
+    url: "https://github.com/mahmoodlab/CLAM"
+
+  - type: article
+    title: "Additive Multiple Instance Learning"
+    url: "https://openreview.net/forum?id=5dHQyEcYDgA"
