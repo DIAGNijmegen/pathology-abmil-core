@@ -1,0 +1,9 @@
+@software{cchia_2024,
+  author = {Catherine Chia, Stephan Dooper, Geert Litjens},
+  doi = {},
+  month = {},
+  title = {{CLAM integrated with Additive MIL}},
+  url = {https://github.com/DIAGNijmegen/pathology-clam-addmil},
+  version = {0.0.1},
+  year = {2024}
+}
