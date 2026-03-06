@@ -55,6 +55,23 @@ cobra-pathology
         ├── images
 ```
 
+## Citations
+If you use this repository or the CSCC dataset, please cite:
+```
+@article{chia2026cscc,
+  title={Automated detection of cutaneous squamous cell carcinoma (CSCC) in whole slide images of skin biopsies using weakly-supervised learning approaches},
+  author={Chia, Catherine et al.},
+  year={2026}
+}
+```
+If you use the `bcc` dataset, please cite:
+```
+@article{geijs2023bcc,
+  title={Detection and subtyping of basal cell carcinoma in whole-slide histopathology using weakly-supervised learning},
+  author={Geijs, Daan et al.},
+  year={2023}
+}
+```
 
 
 
