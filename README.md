@@ -56,7 +56,32 @@ cobra-pathology
 ```
 
 ## Citations
-If you use this repository or the CSCC dataset, please cite:
+If you use this repository, please cite:
+```
+@software{diagnijmegen_pathology_clam_addmil,
+  title={CLAM and Additive MIL},
+  author={Catherine Chia, Ivan Slootweg, Stephan Dooper, and Geert Litjens},
+  url={https://github.com/DIAGNijmegen/pathology-clam-addmil},
+  year={2025}
+}
+```
+
+and CLAM:
+```
+@article{lu2021data,
+  title={Data-efficient and weakly supervised computational pathology on whole-slide images},
+  author={Lu, Ming Y and Williamson, Drew FK and Chen, Tiffany Y and Chen, Richard J and Barbieri, Matteo and Mahmood, Faisal},
+  journal={Nature Biomedical Engineering},
+  volume={5},
+  number={6},
+  pages={555--570},
+  year={2021},
+  publisher={Nature Publishing Group}
+}
+```
+
+
+If you use the `CSCC` dataset, please cite:
 ```
 @article{chia2026cscc,
   title={Automated detection of cutaneous squamous cell carcinoma (CSCC) in whole slide images of skin biopsies using weakly-supervised learning approaches},
@@ -64,7 +89,8 @@ If you use this repository or the CSCC dataset, please cite:
   year={2026}
 }
 ```
-If you use the `bcc` dataset, please cite:
+
+If you use the `BCC` dataset, please cite:
 ```
 @article{geijs2023bcc,
   title={Detection and subtyping of basal cell carcinoma in whole-slide histopathology using weakly-supervised learning},
