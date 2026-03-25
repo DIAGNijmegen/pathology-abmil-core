@@ -34,10 +34,10 @@ def initiate_model(args, ckpt_path, device='cuda'):
             model = MIL_fc_mc(**model_dict)
         else:
             model = MIL_fc(**model_dict)
-
+    
     # print_network(model)
 
-    ckpt = torch.load(ckpt_path)
+    ckpt = torch.load(ckpt_path,map_location = device)['model_state_dict']
     ckpt_clean = {}
     for key in ckpt.keys():
         if 'instance_loss_fn' in key:
@@ -45,6 +45,7 @@ def initiate_model(args, ckpt_path, device='cuda'):
         ckpt_clean.update({key.replace('.module', ''):ckpt[key]})
     model.load_state_dict(ckpt_clean, strict=True)
 
+    # print(model)
     _ = model.to(device)
     _ = model.eval()
     return model
@@ -72,7 +73,8 @@ def initiate_model_extensive(args, ckpt_path, device='cuda'):
     # print_network(model)
 
     print("loading checkpoint")
-    checkpoint = torch.load(ckpt_path, weights_only=True)
+    
+    checkpoint = torch.load(ckpt_path, weights_only=True,map_location = device)
     model.load_state_dict(checkpoint['model_state_dict'])
 
 

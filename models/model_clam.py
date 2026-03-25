@@ -136,6 +136,8 @@ class CLAM_SB(nn.Module):
         return instance_loss, p_preds, p_targets
 
     def forward(self, h, label=None, instance_eval=False, return_features=False, attention_only=False):
+        if h.ndim > 2 and h.shape[0] == 1:
+            h=h.squeeze(0)
         A, h = self.attention_net(h)  # NxK        
         A = torch.transpose(A, 1, 0)  # KxN
         if attention_only:
@@ -166,7 +168,6 @@ class CLAM_SB(nn.Module):
 
             if self.subtyping:
                 total_inst_loss /= len(self.instance_classifiers)
-                
         M = torch.mm(A, h) 
         logits = self.classifiers(M)
         Y_hat = torch.topk(logits, 1, dim = 1)[1]
@@ -203,6 +204,7 @@ class CLAM_MB(CLAM_SB):
         self.subtyping = subtyping
 
     def forward(self, h, label=None, instance_eval=False, return_features=False, attention_only=False):
+        print(h.shape)
         A, h = self.attention_net(h)  # NxK        
         A = torch.transpose(A, 1, 0)  # KxN
         if attention_only:

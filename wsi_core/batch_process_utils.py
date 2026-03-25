@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-import pdb
 	
 '''
 initiate a pandas df describing a list of slides to process
@@ -79,4 +78,8 @@ def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
 	else:
 		slides = pd.DataFrame(default_df_dict)
 	
+	return slides
+
+def sample_process_df(slides,n_sample=10):
+	slides = slides.groupby('label', group_keys=False).sample(n=n_sample, random_state=42)
 	return slides

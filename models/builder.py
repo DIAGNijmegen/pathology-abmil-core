@@ -55,7 +55,9 @@ def get_encoder(model_name, target_img_size=224):
                         num_classes=0, 
                         dynamic_img_size=True, pretrained = True)
         # model.load_state_dict(torch.load(UNI_CKPT_PATH, map_location="cpu"), strict=True)
+ 
 
+        
     elif model_name == 'conch_v1':
         HAS_CONCH, CONCH_CKPT_PATH = has_CONCH()
         assert HAS_CONCH, 'CONCH is not available'
@@ -65,8 +67,9 @@ def get_encoder(model_name, target_img_size=224):
     else:
         raise NotImplementedError('model {} not implemented'.format(model_name))
     
-    print(model)
-    constants = MODEL2CONSTANTS[model_name]
+    with open("/data/temporary/ivan/cpgscriptbackup/cobra_debugging/univ2.txt","w") as f:
+        f.write(f"{model}")
+    # constants = MODEL2CONSTANTS[model_name]
     # img_transforms = get_eval_transforms(mean=constants['mean'],
     #                                      std=constants['std'],
     #                                      target_img_size = target_img_size)

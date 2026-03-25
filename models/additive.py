@@ -1,5 +1,4 @@
 import torch
-from typeguard import typechecked
 from typing import Sequence
 
 class Sum:
@@ -8,8 +7,6 @@ class Sum:
 
 
 class AdditiveClassifier(torch.nn.Module):
-    @typechecked
-
     def __init__(
             self,
             input_dims: int,

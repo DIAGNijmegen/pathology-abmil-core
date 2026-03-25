@@ -14,17 +14,20 @@ from math import floor
 from utils.eval_utils import initiate_model, initiate_model_extensive
 from models.model_clam import CLAM_MB, CLAM_SB
 from models.attentionhead import AttentionSingleBranch, AttentionMultiBranch
+from main import task_to_dataset
 from models import get_encoder
 from types import SimpleNamespace
 from collections import namedtuple
 import h5py
 import yaml
-from wsi_core.batch_process_utils import initialize_df
+from wsi_core.batch_process_utils import initialize_df, sample_process_df
 from vis_utils.heatmap_utils import initialize_wsi, drawHeatmap, compute_from_patches
 from wsi_core.wsi_utils import sample_rois
 from utils.file_utils import save_hdf5
 from tqdm import tqdm
 import matplotlib.pyplot as plt 
+from argparse import Namespace
+
 
 parser = argparse.ArgumentParser(description='Heatmap inference script')
 parser.add_argument('--save_exp_code', type=str, default="bcc_bin_uni_1e5_s1",
@@ -33,6 +36,79 @@ parser.add_argument('--overlap', type=float, default=None)
 parser.add_argument('--config_file', type=str, default="/data/temporary/ivan/cloned_tools/CLAM/heatmaps/configs/config_template_cobra.yaml")
 args = parser.parse_args()
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def dict_to_namespace(d):
+    """
+    Recursively convert a dict to an argparse.Namespace.
+    """
+    if isinstance(d, dict):
+        return Namespace(**{k: dict_to_namespace(v) for k, v in d.items()})
+    else:
+        return d
+        
+def load_or_extract_features_and_coords(slide_id, data_args, model_args, wsi_object,
+                                        model, feature_extractor, img_transforms, 
+                                        blocky_wsi_kwargs, features_path, h5_path,
+                                        device, exp_args):
+    coords = None
+
+    # load from defined location
+    if (hasattr(data_args, "features_dir") and data_args.features_dir ):
+        features_path = os.path.join(data_args.features_dir, slide_id + '.pt')
+        coords_path = os.path.join(data_args.coords_dir, slide_id + data_args.coords_ext)
+
+        print(f"Loading features from: {features_path}")
+        print(f"Loading coordinates from: {coords_path}")
+        features = torch.load(features_path, map_location=device)
+        if ".npy" in coords_path:
+            coords = np.load(coords_path)
+        return features, coords, features_path
+
+    elif not os.path.isfile(h5_path):
+        print("extracting features and coords")
+        # Fall back to h5-based compute pipeline
+        # if model_args.model_type in ['addmil', 'abmil']: 
+        #     _, _, wsi_object = compute_from_patches(wsi_object=wsi_object, 
+        #         model=model, model_type=model_args.model_type,
+        #         feature_extractor=feature_extractor, 
+        #         img_transforms=img_transforms,
+        #         batch_size=exp_args.batch_size, **blocky_wsi_kwargs, 
+        #         attn_save_path=None, feat_save_path=h5_path, 
+        #         ref_scores=None)
+        # else:
+        #     _, _, wsi_object = compute_from_patches(wsi_object=wsi_object, 
+        #         model=model, model_type=None,
+        #         feature_extractor=feature_extractor, 
+        #         img_transforms=img_transforms,
+        #         batch_size=exp_args.batch_size, **blocky_wsi_kwargs, 
+        #         attn_save_path=None, feat_save_path=h5_path, 
+        #         ref_scores=None)
+        if model_args.model_type in ['addmil', 'abmil']: 
+            _, _, wsi_object = compute_from_patches(wsi_object=wsi_object, 
+                model=model, model_type=model_args.model_type,
+                feature_extractor=feature_extractor, 
+                img_transforms=img_transforms,
+                batch_size=exp_args.batch_size, **blocky_wsi_kwargs, 
+                attn_save_path=None, feat_save_path=h5_path, 
+                ref_scores=None)
+
+        else: #CLAM original handling
+            _, _, wsi_object = compute_from_patches(wsi_object=wsi_object, 
+                model=model, model_type=None,
+                feature_extractor=feature_extractor, 
+                img_transforms=img_transforms,
+                batch_size=exp_args.batch_size, **blocky_wsi_kwargs, 
+                attn_save_path=None, feat_save_path=h5_path, 
+                ref_scores=None)   
+            
+    if not os.path.isfile(features_path):
+        with h5py.File(h5_path, "r") as file:
+            features = torch.tensor(file['features'][:])
+            torch.save(features, features_path)
+        features = torch.load(features_path, weights_only=True)
+
+    return features, coords, features_path
+
 
 def infer_single_slide(model, features, label, reverse_label_dict, k=1):
     features = features.to(device)
@@ -94,6 +170,8 @@ def parse_config_dict(args, config_dict):
     if args.overlap is not None:
         config_dict['patching_arguments']['overlap'] = args.overlap
     return config_dict
+
+
 
 def plot_patch_score_histogram(patch_scores,savepth):
     """Plot a histogram of patch scores with bins as 100th percentiles."""
@@ -178,11 +256,37 @@ if __name__ == '__main__':
             slides = sorted(os.listdir(data_args.data_dir))
         slides = [slide for slide in slides if data_args.slide_ext in slide]
         df = initialize_df(slides, def_seg_params, def_filter_params, def_vis_params, def_patch_params, use_heatmap_args=False)
-        
-    else:
+
+    elif isinstance(data_args.process_list,dict):
+        process_list = dict_to_namespace(data_args.process_list)
+
+        datasetargs = {"task": process_list.task,
+                       "data_label_csv_path": process_list.data_label_csv_path,
+                       "datatype": process_list.datatype,
+                       "data_root_dir": process_list.data_root_dir,
+                       "seed": 0,
+                       "slide_col": process_list.slide_col,
+                       "label_col": process_list.label_col,
+                       "model_type": None}
+        datasetargs = dict_to_namespace(datasetargs)
+
+        ds = task_to_dataset(datasetargs)
+        if (hasattr(process_list,"n_per_class") and process_list.n_per_class):
+            df = ds.sample_df(process_list.n_per_class)
+        else:
+            df = ds.slide_data
+        df = initialize_df(df, def_seg_params, def_filter_params, def_vis_params, def_patch_params, use_heatmap_args=False)
+
+    elif (".csv" in str(data_args.process_list)):
         df = pd.read_csv(data_args.process_list)
         df = initialize_df(df, def_seg_params, def_filter_params, def_vis_params, def_patch_params, use_heatmap_args=False)
 
+    else:
+        raise NotImplementedError("cannot create process list from argument: ", args.process_list)
+    
+    if data_args.testing:
+        df = sample_process_df(df)
+        
     mask = df['process'] == 1
     process_stack = df[mask].reset_index(drop=True)
     total = len(process_stack)
@@ -196,7 +300,7 @@ if __name__ == '__main__':
     if model_args.initiate_fn == 'initiate_model':
         model =  initiate_model(model_args, ckpt_path)
     elif model_args.initiate_fn == "initiate_model_extensive":
-        model = initiate_model_extensive(model_args,ckpt_path)
+        model = initiate_model_extensive(model_args,ckpt_path,device=device)
     else:
         raise NotImplementedError
 
@@ -227,7 +331,7 @@ if __name__ == '__main__':
         except KeyError:
             label = 'Unspecified'
 
-        slide_id = slide_name.replace(data_args.slide_ext, '')
+        slide_id = slide_name.replace(data_args.slide_ext, '').split("/")[-1]
 
         if not isinstance(label, str):
             grouping = reverse_label_dict[label]
@@ -309,11 +413,12 @@ if __name__ == '__main__':
         mask = wsi_object.visWSI(**vis_params, number_contours=True)
         mask.save(mask_path)
         
+        # TODO: IMPLEMENT LOADING OF PRE-EXISTING FEATURES AND H5 ELSEWHERE (incl. numpy coordinates)
         features_path = os.path.join(r_slide_save_dir, slide_id+'.pt')
         h5_path = os.path.join(r_slide_save_dir, slide_id+'.h5')
-
-
-        ##### check if h5_features_file exists ######
+        
+        coords = None
+        # ##### check if h5_features_file exists ######
         if not os.path.isfile(h5_path) :
             if model_args.model_type in ['addmil', 'abmil']: 
                 _, _, wsi_object = compute_from_patches(wsi_object=wsi_object, 
@@ -323,7 +428,7 @@ if __name__ == '__main__':
                     batch_size=exp_args.batch_size, **blocky_wsi_kwargs, 
                     attn_save_path=None, feat_save_path=h5_path, 
                     ref_scores=None)
-	
+    
             else: #CLAM original handling
                 _, _, wsi_object = compute_from_patches(wsi_object=wsi_object, 
                     model=model, model_type=None,
@@ -342,6 +447,14 @@ if __name__ == '__main__':
 
         # load features 
         features = torch.load(features_path, weights_only=True)
+
+        # features, coords, features_path =  load_or_extract_features_and_coords(
+        #         slide_id, data_args, model_args, wsi_object,
+        #         model, feature_extractor, img_transforms,
+        #         blocky_wsi_kwargs, features_path, h5_path,
+        #         device, exp_args
+        #     )
+        
         process_stack.loc[i, 'bag_size'] = len(features)
         
         #Save segmentation mask
@@ -351,11 +464,14 @@ if __name__ == '__main__':
         Y_hats, Y_hats_str, Y_probs, A = infer_single_slide(model, features, label, reverse_label_dict, exp_args.n_classes)
         del features
         
-        #Save raw blockmap.h5
+        # TODO: BELOW IS WHERE COORDS AND ATTENTION SCORES PER PATCH ARE COMBINED
+        # Save raw blockmap.h5
         if not os.path.isfile(block_map_save_path): 
-            file = h5py.File(h5_path, "r")
-            coords = file['coords'][:]
-            file.close()
+            if coords is None:
+                file = h5py.File(h5_path, "r")
+                coords = file['coords'][:]
+                file.close()
+            print( "coords: ", coords.shape)
             asset_dict = {'attention_scores': A, 'coords': coords}
             block_map_save_path = save_hdf5(block_map_save_path, asset_dict, mode='w')
         
@@ -365,7 +481,7 @@ if __name__ == '__main__':
             process_stack.loc[i, 'p_{}'.format(c)] = Y_probs[c]
 
         os.makedirs('./heatmaps/results/', exist_ok=True)
-        if data_args.process_list is not None:
+        if (data_args.process_list is not None) and not isinstance(data_args.process_list,dict):
             process_stack.to_csv('{}.csv'.format(data_args.process_list.replace('.csv', '')), index=False)
         else:
             process_stack.to_csv('{}.csv'.format(exp_args.save_exp_code), index=False)

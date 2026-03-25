@@ -26,13 +26,13 @@ data_arguments:
   # label dictionary for str: interger mapping (optional)
   label_dict:
     normal: 0
-    bccc: 1       
+    bcc: 1       
 patching_arguments:
   # arguments for patching
   patch_size: 256
   overlap: 0
   patch_level: 0
-  custom_downsample: 1
+  custom_downsample: 64
 encoder_arguments:
   # arguments for the pretrained encoder model
   model_name: uni_v1 # currently support: resnet50_trunc, uni_v1, conch_v1

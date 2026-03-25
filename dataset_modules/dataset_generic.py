@@ -12,6 +12,8 @@ from torch.utils.data import Dataset
 import h5py
 
 from utils.utils import generate_split, nth
+device=str(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+
 
 def save_splits(split_datasets, column_keys, filename, boolean_style=False):
 	splits = [split_datasets[i].slide_data['slide_id'] for i in range(len(split_datasets))]
@@ -34,13 +36,15 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		shuffle = False, 
 		seed = 7, 
 		print_info = True,
+		slide_col = "slide_id",
 		label_dict = {},
 		filter_dict = {},
 		ignore=[],
 		patient_strat=False,
-		label_col = None,
+		label_col = "label",
+		case_id_col = "case_id",
 		patient_voting = 'max',
-		datatype="h5"
+		datatype=None,
 		):
 		"""
 		Args:
@@ -58,10 +62,9 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		self.patient_strat = patient_strat
 		self.train_ids, self.val_ids, self.test_ids  = (None, None, None)
 		self.data_dir = None
-		if not label_col:
-			label_col = 'label'
 		self.label_col = label_col
-
+		self.slide_col = slide_col
+		self.case_id_col = case_id_col
 		slide_data = pd.read_csv(csv_path)
 		slide_data = self.filter_df(slide_data, filter_dict)
 		slide_data = self.df_prep(slide_data, self.label_dict, ignore, self.label_col)
@@ -108,14 +111,27 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		
 		self.patient_data = {'case_id':patients, 'label':np.array(patient_labels)}
 
-	@staticmethod
-	def df_prep(data, label_dict, ignore, label_col):
+	def df_prep(self, data, label_dict, ignore, label_col):
 		if label_col != 'label':
 			data['label'] = data[label_col].copy()
+		else:
+			data[f'raw_label'] = data['label'].copy()
+		data.dropna(subset=[self.slide_col], inplace=True)	
+
+		if self.slide_col != 'slide_id':
+			data['slide_id'] = data[self.slide_col].copy()
+
+		if self.case_id_col!= "case_id":
+			data["case_id"] = data[self.case_id_col].copy()
 
 		mask = data['label'].isin(ignore)
 		data = data[~mask]
 		data.reset_index(drop=True, inplace=True)
+
+		if len(self.label_dict) > 0:
+			mask = data['label'].isin(label_dict.keys())
+			data = data[mask]
+
 		for i in data.index:
 			key = data.loc[i, 'label']
 			data.at[i, 'label'] = label_dict[key]
@@ -191,7 +207,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		split = split.dropna().reset_index(drop=True)
 
 		if len(split) > 0:
-			mask = self.slide_data['slide_id'].isin(split.tolist())
+			mask = self.slide_data['case_id'].isin(split.tolist())
 			df_slice = self.slide_data[mask].reset_index(drop=True)
 			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
 		else:
@@ -207,13 +223,16 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			merged_split.extend(split)
 
 		if len(split) > 0:
-			mask = self.slide_data['slide_id'].isin(merged_split)
+			mask = self.slide_data['case_id'].isin(merged_split)
 			df_slice = self.slide_data[mask].reset_index(drop=True)
 			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes,datatype=self.datatype)
 		else:
 			split = None
 		
 		return split
+
+	def sample_df(self,n_per_class):
+		return self.slide_data.groupby('label', group_keys=False).apply(lambda x: x.sample(n=min(n_per_class, len(x)), random_state=42))
 
 
 	def return_splits(self, from_id=True, csv_path=None):
@@ -325,46 +344,47 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 
 
 	def __getitem__(self, idx):
-		try:
-			slide_id = self.slide_data['slide_id'][idx]
-			label = self.slide_data['label'][idx]
-			if self.datatype:
-				datatype = self.datatype
-			else:
-				datatype = self.datatypes[idx]
+		# try:
+		slide_id = self.slide_data['slide_id'][idx]
+		label = self.slide_data['label'][idx]
+		if not self.datatype:
+			datatype = self.datatypes[idx]
+		else:
+			datatype = self.datatype
+
+		if type(self.data_dir) == dict:
+			source = self.slide_data['source'][idx]
+			data_dir = self.data_dir[source]
+		else:
+			data_dir = self.data_dir
+		if datatype == "pt":
+			full_path = os.path.join(data_dir, slide_id)
+			features = torch.load(str(full_path),map_location=device)
+			return features, label
+			
+		elif datatype == "npy":
+			print(data_dir,slide_id, datatype, label)
+			full_path = os.path.join(data_dir, slide_id)
+			features = np.load(full_path)
+			features = torch.from_numpy(features)
+			return features, label
 
 
-			if type(self.data_dir) == dict:
-				source = self.slide_data['source'][idx]
-				data_dir = self.data_dir[source]
-			else:
-				data_dir = self.data_dir
+		elif datatype == "h5":
+			print(data_dir,slide_id, datatype)
+			full_path = os.path.join(data_dir, slide_id)
+			with h5py.File(full_path,'r') as hdf5_file:
+				features = hdf5_file['features'][:]
+				coords = hdf5_file['coords'][:]
 
-			if datatype == "pt":
-				full_path = os.path.join(data_dir, slide_id)
-				features = torch.load(full_path)
-				return features, label
-				
+			features = torch.from_numpy(features)
+			return features, label, coords
+		else:
+			raise ValueError("Unspecified datatype: {}".format(datatype))
+		# except Exception as e:
+		# 	print(e)
+		# 	print(data_dir, slide_id, self.datatype)
 
-			elif datatype == "npy":
-				full_path = os.path.join(data_dir, slide_id)
-				features = np.load(full_path)
-				features = torch.from_numpy(features)
-				return features, label
-
-
-			elif datatype == "h5":
-				full_path = os.path.join(data_dir, slide_id)
-				with h5py.File(full_path,'r') as hdf5_file:
-					features = hdf5_file['features'][:]
-					coords = hdf5_file['coords'][:]
-
-				features = torch.from_numpy(features)
-				return features, label, coords
-		except Exception as e:
-			print(e)
-			print(data_dir, slide_id, self.datatype)
-			print(self.slide_data.iloc[0]["slide_id"].split(".")[-1])
 
 class Generic_Split(Generic_MIL_Dataset):
 	def __init__(self, slide_data, data_dir="", num_classes=2,datatype=None):
@@ -378,6 +398,7 @@ class Generic_Split(Generic_MIL_Dataset):
 
 		self.datatypes = self.slide_data["slide_id"].apply(lambda x: x.split(".")[-1])
 		self.datatype = datatype
+
 
 	def __len__(self):
 		return len(self.slide_data)
