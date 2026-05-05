@@ -31,6 +31,7 @@ def main(args):
         start = 0
     else:
         start = args.k_start
+
     if args.k_end == -1:
         end = args.k
     else:
@@ -128,6 +129,8 @@ parser.add_argument('--bag_weight', type=float, default=0.7,
                     help='clam: weight coefficient for bag-level loss (default: 0.7)')
 parser.add_argument('--B', type=int, default=8, help='number of positive/negative patches to sample for clam')
 parser.add_argument('--data_label_csv_path', type=str, default=None, help='data label directory')    
+parser.add_argument('--use_rope', action='store_true', default=False,
+                    help='enable RoPE for addmil models and load coords from h5 bags')
 args = parser.parse_args()
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -160,6 +163,7 @@ settings = {'num_splits': args.k,
             'seed': args.seed,
             'model_type': args.model_type,
             'model_size': args.model_size,
+            'use_rope': args.use_rope,
             "use_drop_out": args.drop_out,
             'weighted_sample': args.weighted_sample,
             'opt': args.opt}
@@ -187,11 +191,14 @@ elif args.task == 'cscc_vs_noncscc':
     dataset = Generic_MIL_Dataset(csv_path = args.data_label_csv_path,
                             data_dir= os.path.join(args.data_root_dir, 'features'),
                             shuffle = False, 
+                            use_rope = args.use_rope,
                             seed = args.seed, 
                             print_info = True,
                             label_dict = {'non-cscc':0, 'cscc':1},
                             patient_strat=False,
                             ignore=[])
+    dataset.load_from_h5(args.use_rope)
+    
 
 elif args.task == 'task_2_tumor_subtyping':
     args.n_classes=3

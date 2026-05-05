@@ -37,35 +37,59 @@ def collate_MIL(batch):
 	label = torch.LongTensor([item[1] for item in batch])
 	return [img, label]
 
+def collate_MIL_rope(batch):
+	# Expect each dataset.__getitem__ to return (features, label, coords)
+	# Provide a clearer error if coords are missing to aid debugging.
+	try:
+		imgs = [item[0] for item in batch]
+		labels = [item[1] for item in batch]
+		coords_list = [item[2] for item in batch]
+	except Exception:
+		sample = batch[0]
+		raise IndexError(
+			"collate_MIL_rope expected dataset items of the form (features, label, coords). "
+			f"Got sample with length {len(sample)}. If you enabled RoPE (use_rope=True), ensure your dataset returns coords (e.g. call `load_from_h5(True)` or return coords from `__getitem__`)."
+		)
+
+	img = torch.cat(imgs, dim=0)
+	label = torch.LongTensor(labels)
+	coords = torch.from_numpy(np.stack(coords_list, axis=0))
+	return [img, label, coords]
+
 def collate_features(batch):
 	img = torch.cat([item[0] for item in batch], dim = 0)
 	coords = np.vstack([item[1] for item in batch])
 	return [img, coords]
 
 
-def get_simple_loader(dataset, batch_size=1, num_workers=1):
+
+def get_simple_loader(dataset, batch_size=1, num_workers=1, use_rope=False):
 	kwargs = {'pin_memory': False, 'num_workers': num_workers} if device.type == "cuda" else {}
-	loader = DataLoader(dataset, batch_size=batch_size, sampler = sampler.SequentialSampler(dataset), collate_fn = collate_MIL, **kwargs)
+	collate_fn = collate_MIL_rope if use_rope else collate_MIL
+	loader = DataLoader(dataset, batch_size=batch_size, sampler = sampler.SequentialSampler(dataset), collate_fn = collate_fn, **kwargs)
 	return loader 
 
-def get_split_loader(split_dataset, training = False, testing = False, weighted = False):
+def get_split_loader(split_dataset, training = False, testing = False, weighted = False, use_rope=False, num_workers=None):
 	"""
 		return either the validation loader or training loader 
 	"""
-	kwargs = {'num_workers': 4} if device.type == "cuda" else {}
+	if num_workers is None:
+		num_workers = 4 if device.type == "cuda" else 0
+	kwargs = {'num_workers': num_workers}
+	collate_fn = collate_MIL_rope if use_rope else collate_MIL
 	if not testing:
 		if training:
 			if weighted:
 				weights = make_weights_for_balanced_classes_split(split_dataset)
-				loader = DataLoader(split_dataset, batch_size=1, sampler = WeightedRandomSampler(weights, len(weights)), collate_fn = collate_MIL, **kwargs)	
+				loader = DataLoader(split_dataset, batch_size=1, sampler = WeightedRandomSampler(weights, len(weights)), collate_fn = collate_fn, **kwargs)	
 			else:
-				loader = DataLoader(split_dataset, batch_size=1, sampler = RandomSampler(split_dataset), collate_fn = collate_MIL, **kwargs)
+				loader = DataLoader(split_dataset, batch_size=1, sampler = RandomSampler(split_dataset), collate_fn = collate_fn, **kwargs)
 		else:
-			loader = DataLoader(split_dataset, batch_size=1, sampler = SequentialSampler(split_dataset), collate_fn = collate_MIL, **kwargs)
+			loader = DataLoader(split_dataset, batch_size=1, sampler = SequentialSampler(split_dataset), collate_fn = collate_fn, **kwargs)
 	
 	else:
 		ids = np.random.choice(np.arange(len(split_dataset), int(len(split_dataset)*0.1)), replace = False)
-		loader = DataLoader(split_dataset, batch_size=1, sampler = SubsetSequentialSampler(ids), collate_fn = collate_MIL, **kwargs )
+		loader = DataLoader(split_dataset, batch_size=1, sampler = SubsetSequentialSampler(ids), collate_fn = collate_fn, **kwargs )
 
 	return loader
 

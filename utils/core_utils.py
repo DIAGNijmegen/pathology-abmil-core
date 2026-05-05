@@ -122,6 +122,7 @@ def train(datasets, cur, args):
             loss_fn = loss_fn.cuda()
     else:
         loss_fn = nn.CrossEntropyLoss()
+
     print('Done!')
     
     print('\nInit Model...', end=' ')
@@ -159,6 +160,7 @@ def train(datasets, cur, args):
         if args.model_size=='small':
             model_dict.update({'size_arg': 'small'})	
         model_dict.update({'additive': True})
+        model_dict.update({'use_rope': getattr(args, 'use_rope', False)})
         model = AttentionSingleBranch(**model_dict)
 
     else: # args.model_type == 'mil'
@@ -176,15 +178,24 @@ def train(datasets, cur, args):
     print('Done!')
     
     print('\nInit Loaders...', end=' ')
-    train_loader = get_split_loader(train_split, training=True, testing = args.testing, weighted = args.weighted_sample)
-    val_loader = get_split_loader(val_split,  testing = args.testing)
-    test_loader = get_split_loader(test_split, testing = args.testing)
-    print('Done!')
+    # Ensure dataset splits will return coords when RoPE is enabled.
+    use_rope_flag = getattr(args, 'use_rope', False)
+    if use_rope_flag:
+        for split in (train_split, val_split, test_split):
+            if split is None:
+                continue
+            if hasattr(split, 'load_from_h5'):
+                print(f"Enabling RoPE: calling load_from_h5(True) on split dataset {split}")
+                split.load_from_h5(True)
 
+    train_loader = get_split_loader(train_split, training=True, testing = args.testing, weighted = args.weighted_sample, use_rope=use_rope_flag)
+    val_loader = get_split_loader(val_split,  testing = args.testing, use_rope=use_rope_flag)
+    test_loader = get_split_loader(test_split, testing = args.testing, use_rope=use_rope_flag)
+    print('Done!')
+    
     print('\nSetup EarlyStopping...', end=' ')
     if args.early_stopping:
         early_stopping = EarlyStopping(patience = 20, stop_epoch=50, verbose = True)
-
     else:
         early_stopping = None
     print('Done!')
@@ -194,9 +205,13 @@ def train(datasets, cur, args):
             train_loop_clam(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, writer, loss_fn)
             stop = validate_clam(cur, epoch, model, val_loader, args.n_classes, 
                 early_stopping, writer, loss_fn, args.results_dir)
-        elif args.model_type in ['addmil']:   
+        elif args.model_type in ['addmil'] and not use_rope_flag:   
             train_loop_clam_addmil(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, writer, loss_fn)
             stop = validate_clam_addmil(cur, epoch, model, val_loader, args.n_classes, 
+                early_stopping, writer, loss_fn, args.results_dir)
+        elif args.model_type in ['addmil'] and use_rope_flag:   
+            train_loop_clam_addmil_rope(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, writer, loss_fn)
+            stop = validate_clam_addmil_rope(cur, epoch, model, val_loader, args.n_classes, 
                 early_stopping, writer, loss_fn, args.results_dir)
         else:
             train_loop(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn)
@@ -212,10 +227,10 @@ def train(datasets, cur, args):
         torch.save(model.state_dict(), os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur)))
 
     if args.model_type in ['addmil']:
-        results_val_dict, val_error, val_auc, _= summary_clam_addmil(model, val_loader, args.n_classes) #Changed to results_val_dict to reflect val results
+        results_val_dict, val_error, val_auc, _= summary_clam_addmil(model, val_loader, args.n_classes, use_rope=use_rope_flag) #Changed to results_val_dict to reflect val results
         print('Val error: {:.4f}, ROC AUC: {:.4f}'.format(val_error, val_auc))
 
-        results_test_dict, test_error, test_auc, acc_logger = summary_clam_addmil(model, test_loader, args.n_classes) #Changed to results_test_dict to reflect test results
+        results_test_dict, test_error, test_auc, acc_logger = summary_clam_addmil(model, test_loader, args.n_classes, use_rope=use_rope_flag) #Changed to results_test_dict to reflect test results
         print('Test error: {:.4f}, ROC AUC: {:.4f}'.format(test_error, test_auc))
     else: #CLAM original handling
         results_val_dict, val_error, val_auc, _= summary(model, val_loader, args.n_classes)
@@ -361,6 +376,113 @@ def train_loop_clam_addmil(epoch, model, loader, optimizer, n_classes, bag_weigh
     if writer:
         writer.add_scalar('train/loss', train_loss, epoch)
         writer.add_scalar('train/error', train_error, epoch)
+
+def train_loop_clam_addmil_rope(epoch, model, loader, optimizer, n_classes, bag_weight, writer=None, loss_fn=None):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.train()
+    acc_logger = Accuracy_Logger(n_classes=n_classes)
+
+    train_loss = 0.
+    train_error = 0.
+
+    print('\n')
+    for batch_idx, batch in enumerate(loader):
+        data, label, coords = batch
+        data = data.to(device)
+        label = label.to(device)
+        coords = coords.to(device).float()
+        # Print batch shapes for debugging
+        #print("Training batch {}: data shape {}, label shape {}, coords shape {}".format(batch_idx, data.shape, label.shape, coords.shape))
+        bag_logits, att_raw, results_dict = model(data, coords=coords)
+
+        Y_hat = torch.topk(bag_logits, 1, dim=1)[1]
+        Y_prob = F.softmax(bag_logits, dim=1)
+
+        acc_logger.log(Y_hat, label)
+        loss = loss_fn(bag_logits, label)
+        loss_value = loss.item()
+        train_loss += loss_value
+
+        if (batch_idx + 1) % 20 == 0:
+            print('batch {}, loss: {:.4f}, '.format(batch_idx, loss_value) +
+                'label: {}, bag_size: {}'.format(label.item(), data.size(0)))
+
+        error = calculate_error(Y_hat, label)
+        train_error += error
+
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+    train_loss /= len(loader)
+    train_error /= len(loader)
+
+    print('Epoch: {}, train_loss: {:.4f}, train_error: {:.4f}'.format(epoch, train_loss, train_error))
+    for i in range(n_classes):
+        acc, correct, count = acc_logger.get_summary(i)
+        print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))
+        if writer and acc is not None:
+            writer.add_scalar('train/class_{}_acc'.format(i), acc, epoch)
+
+    if writer:
+        writer.add_scalar('train/loss', train_loss, epoch)
+        writer.add_scalar('train/error', train_error, epoch)
+
+def validate_clam_addmil_rope(cur, epoch, model, loader, n_classes, early_stopping=None, writer=None, loss_fn=None, results_dir=None):
+    model.eval()
+    acc_logger = Accuracy_Logger(n_classes=n_classes)
+    val_loss = 0.
+    val_error = 0.
+
+    prob = np.zeros((len(loader), n_classes))
+    labels = np.zeros(len(loader))
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(loader):
+            data, label, coords = batch
+            #print("Validation batch {}: data shape {}, label shape {}, coords shape {}".format(batch_idx, data.shape, label.shape, coords.shape))
+            data = data.to(device, non_blocking=True)
+            label = label.to(device, non_blocking=True)
+            coords = coords.to(device).float()
+
+            bag_logits, att_raw, results_dict = model(data, coords=coords)
+            Y_hat = torch.topk(bag_logits, 1, dim=1)[1]
+            Y_prob = F.softmax(bag_logits, dim=1)
+
+            acc_logger.log(Y_hat, label)
+            loss = loss_fn(bag_logits, label)
+            val_loss += loss.item()
+
+            prob[batch_idx] = Y_prob.cpu().numpy()
+            labels[batch_idx] = label.item()
+            val_error += calculate_error(Y_hat, label)
+
+    val_error /= len(loader)
+    val_loss /= len(loader)
+
+    if n_classes == 2:
+        auc = roc_auc_score(labels, prob[:, 1])
+    else:
+        auc = roc_auc_score(labels, prob, multi_class='ovr')
+
+    if writer:
+        writer.add_scalar('val/loss', val_loss, epoch)
+        writer.add_scalar('val/auc', auc, epoch)
+        writer.add_scalar('val/error', val_error, epoch)
+
+    print('\nVal Set, val_loss: {:.4f}, val_error: {:.4f}, auc: {:.4f}'.format(val_loss, val_error, auc))
+    for i in range(n_classes):
+        acc, correct, count = acc_logger.get_summary(i)
+        print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))
+
+    if early_stopping:
+        assert results_dir
+        early_stopping(epoch, val_loss, model, ckpt_name=os.path.join(results_dir, "s_{}_checkpoint.pt".format(cur)))
+        if early_stopping.early_stop:
+            print("Early stopping")
+            return True
+
+    return False
 
 def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_fn = None):   
     model.train()
@@ -675,7 +797,7 @@ def summary(model, loader, n_classes):
 
     return patient_results, test_error, auc, acc_logger
 
-def summary_clam_addmil(model, loader, n_classes):
+def summary_clam_addmil(model, loader, n_classes, use_rope=False):
     #device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     acc_logger = Accuracy_Logger(n_classes=n_classes)
     model.eval()
@@ -688,16 +810,25 @@ def summary_clam_addmil(model, loader, n_classes):
     slide_ids = loader.dataset.slide_data['slide_id']
     patient_results = {}
 
-    for batch_idx, (data, label) in enumerate(loader):
-        data, label = data.to(device), label.to(device)
+    for batch_idx, batch in enumerate(loader):
+        if use_rope:
+            data, label, coords = batch
+            data = data.to(device)
+            label = label.to(device)
+            coords = coords.to(device).float()
+        else:
+            data, label = batch
+            data, label = data.to(device), label.to(device)
         
         #Add one dimension for batch size
         #data = data.unsqueeze(0)
 
         slide_id = slide_ids.iloc[batch_idx]
         with torch.no_grad():
-            #logits, Y_prob, Y_hat, _, _ = model(data)
-            logits,_, _ = model(data)
+            if use_rope:
+                logits,_, _ = model(data, coords=coords)
+            else:
+                logits,_, _ = model(data)
             Y_hat = torch.topk(logits, 1, dim = 1)[1]
             Y_prob = F.softmax(logits, dim = 1) #probs = sigmoid(logits) if self.is_multilabel else softmax(logits, dim=1)
 

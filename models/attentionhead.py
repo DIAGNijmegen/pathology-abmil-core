@@ -117,7 +117,8 @@ class AttentionSingleBranch(nn.Module):
         dropout: float = 0.25,
         n_classes: int = 2,
         additive: bool = False,
-        embed_dim=1024
+        embed_dim=1024,
+        use_rope: bool = False
     ):
         super().__init__()
 
@@ -125,6 +126,17 @@ class AttentionSingleBranch(nn.Module):
         if size_arg == "small":
             embed_dim = 1024
             size = (embed_dim, 512, 256) #small in CLAM. #TODO embed_dim is hardcoded to 1024 in this version
+
+        # rotary positional embedding (RoPE) configuration
+        # enable by passing `coords` to `forward`. Uses interleaved pair rotation.
+        # RoPE is applied to input features (size[0] dimension), not the hidden dimension
+        self.use_rope = use_rope
+        if self.use_rope:
+            if size[0] % 2 != 0:
+                raise ValueError("RoPE requires an even feature dimension, got %d" % size[0])
+            # learn a 2D -> pair-angle projection that is shared across all bags
+            # Maps 2D coords to angles for each pair of the input feature dimension
+            self.rope_proj = nn.Parameter(torch.randn(2, size[0] // 2) * 0.01)
 
         self.additive = additive
         self.n_classes = n_classes
@@ -146,6 +158,8 @@ class AttentionSingleBranch(nn.Module):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if self.additive:
             self.additive_classifiers = self.additive_classifiers.to(device)
+        if self.use_rope:
+            self.rope_proj = self.rope_proj.to(device)
         self.attention_net = self.attention_net.to(device)
         self.classifiers = self.classifiers.to(device)
 
@@ -171,7 +185,68 @@ class AttentionSingleBranch(nn.Module):
         att = F.softmax(att, dim=1)  # softmax over N 
         return x_transformed, att_raw, att
 
-    def forward(self, x):
+    def _apply_rope(self, x, coords):
+        """
+        Apply interleaved RoPE to feature tensor `x` using 2D `coords` (microns).
+        x: [B, N, C] or [N, C] (will unsqueeze [N,C] -> [1,N,C])
+        coords: [B, N, 2] or [N, 2]
+        """
+        if coords is None or not self.use_rope:
+            return x
+        #
+        # normalize x to shape [B, N, C]
+        squeeze_batch = False
+        if x.dim() == 2:
+            # [N, C] -> add batch dim -> [1, N, C]
+            x = x.unsqueeze(0)
+            squeeze_batch = True
+        #
+        # normalize coords to shape [B, N, 2]
+        if coords.dim() == 2:
+            # [N,2] -> assume batch size 1
+            coords = coords.unsqueeze(0)
+        #
+        if coords.dim() != 3:
+            raise ValueError("coords must be shape [B,N,2] or [N,2]")
+        #
+        b, n, cdim = x.shape
+        if coords.shape[0] != b or coords.shape[1] != n:
+            # try to broadcast batch dimension
+            if coords.shape[0] == 1:
+                coords = coords.expand(b, -1, -1)
+            else:
+                raise ValueError("coords batch/length mismatch with x")
+        #
+        C = x.shape[-1]
+        if C % 2 != 0:
+            raise ValueError("RoPE requires even feature dimension, got %d" % C)
+        #
+        # project coords to angles per pair: [B,N,pair_count]
+        proj = self.rope_proj  # [2, pair_count]
+        angles = torch.einsum("bnd,dp->bnp", coords, proj)
+        #
+        # reshape features into pairs
+        pairs = x.view(b, n, C // 2, 2)
+        #
+        cos = torch.cos(angles)  # [B,N,pair]
+        sin = torch.sin(angles)
+        #
+        x0 = pairs[..., 0]
+        x1 = pairs[..., 1]
+        #
+        # rotate (interleaved): (x0*cos - x1*sin, x0*sin + x1*cos)
+        r0 = x0 * cos - x1 * sin
+        r1 = x0 * sin + x1 * cos
+        #
+        rotated = torch.stack([r0, r1], dim=-1).reshape(b, n, C)
+        
+        # remove batch dimension if we added it
+        if squeeze_batch:
+            rotated = rotated.squeeze(0)
+        
+        return rotated
+
+    def forward(self, x, coords=None):
         """
         Forward a feature vector through the attention network
         Parameters
@@ -182,20 +257,24 @@ class AttentionSingleBranch(nn.Module):
         -------
 
         """
+        # apply RoPE to incorporate micron coordinates if provided
+        if coords is not None and self.use_rope:
+            x = self._apply_rope(x, coords)
+        #
         x, att_raw, att = self._compute_attention(x) # x=h, att_raw=A_raw, att=A
         #pooled_features = torch.bmm(att, x) #batch matrix-matrix product # M = torch.mm(A, h) #torch.Size([1, 1, 512])
         pooled_features = torch.mm(att, x) #torch.Size([1, 512])
         att_pool_logits = self.classifiers(pooled_features)
-
+        #
         results_dict = {"attention": att_raw}
-
+        #
         if self.additive:
             classifier_out_dict = self.additive_classifiers(x, att.transpose(0, 1))
             bag_logits = classifier_out_dict["logits"]
             results_dict.update(
                 {"patch_logits": classifier_out_dict["patch_logits"], "att_pool_logits": att_pool_logits} 
             )
-
+            #
             return bag_logits, att_raw, results_dict
         return att_pool_logits, att_raw, results_dict
 
@@ -311,4 +390,134 @@ class AttentionMultiBranch(AttentionSingleBranch):
 
         return att_pool_logits, results_dict
 
+# # ORIGINAL
+# class AttentionSingleBranch(nn.Module):
+#     """Single branch weakly supervised classification and segmentation with additive constraints.
+#     This class implements the single branch attention networks with additional additive constraints.
+#     The additive constraint allows the attention maps to be converted into a heatmap with a logit/probability
+#     interpretation, which gives more concise information about the contribution of each pixel towards the predicted
+#     class.
+#     If the additive model is used, an additional fully connected layer transforms the attention scores into n_classes
+#     additional heatmaps. Each of these heatmaps is tied to one specific class. We then perform a sum operation over
+#     each heatmap individually, which we will use as the image-level logit score. A softmax or sigmoid can then be
+#     used to calculate the final prediction for the image.
+#     Parameters
+#     ----------
+#     size: list[int, int, int] | None
+#         A list with 3 integers specifiying the sizes for the input dimensions for the attention network, the bottleneck
+#         dimension for the fully connected layers, and the bottleneck dimension within the attention network.
+#     use_dropout : bool
+#         Whether to use dropout layers within the network. If true, it will randomly disable 25% of the connections
+#     n_classes: int
+#         The number of classes of the weakly supervised classificatio
+#     additive: bool
+#         Whether to use additive classifiers. If true, an additional heatmap is created, equal to the amount of classes
+#         specified in n_classes.
+#     #
+#     Symbols
+#     ----------
+#     C: The number of channels from the feature extractor
+#     K: Number of classes to predict
+#     N: The number of spatial elements in the feature map (height of the image, multiplied by the width of the image).
+#     B : The batch size. Usually 1 for pathology tasks
+#     #
+#     References
+#     ----------
+#     . [*] Ilse, M., Tomczak, J. M., & Welling, M. (2018). Attention-based Deep Multiple Instance Learning.
+#     . [*] Lu, Ming Y and Williamson, Drew FK and Chen, Tiffany Y and Chen, Richard J and Barbieri, Matteo
+#            and Mahmood, Faisal. (2021). Data-efficient and weakly supervised computational pathology on whole-slide
+#            images. Nature Biomedical Engineering
+#     . [*] S.A. Javed, D. Juyal, H. Padigela, A. Taylor-Weiner, L. Yu, A. Prakash. (2022).
+#            Additive MIL: Intrinsically Interpretable Multiple Instance Learning for Pathology
+#     """
 
+#     def __init__(
+#         self,
+#         gate=None, #not used
+#         size_arg = "small", 
+#         #size: tuple[int, int, int] | None = None,
+#         # use_dropout: bool = False,
+#         dropout: float = 0.25,
+#         n_classes: int = 2,
+#         additive: bool = False,
+#         embed_dim=1024
+#     ):
+#         super().__init__()
+
+#         #if size is None:
+#         if size_arg == "small":
+#             embed_dim = 1024
+#             size = (embed_dim, 512, 256) #small in CLAM. #TODO embed_dim is hardcoded to 1024 in this version
+
+#         self.additive = additive
+#         self.n_classes = n_classes
+
+#         fc = [nn.Linear(size[0], size[1]), nn.ReLU()]
+#         #if dropout:
+#         fc.append(nn.Dropout(dropout)) # Changed to using dropout probability instead of boolean flag to keep the layer consistent in eval and training
+#         attention_net = GatedAttention(input_dim=size[1], bottleneck_dim=size[2], dropout=dropout, n_branches=1)
+#         fc.append(attention_net)
+#         self.attention_net = nn.Sequential(*fc)
+#         self.classifiers = nn.Linear(size[1], n_classes)
+
+#         if self.additive:
+#             self.additive_classifiers = AdditiveClassifier(input_dims=size[1], output_dims=n_classes, hidden_dims=[])
+
+#         self.apply(initialize_weights)
+
+#     def relocate(self):
+#         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#         if self.additive:
+#             self.additive_classifiers = self.additive_classifiers.to(device)
+#         self.attention_net = self.attention_net.to(device)
+#         self.classifiers = self.classifiers.to(device)
+
+#     def _compute_attention(self, x):
+#         """
+#         Compute the attention given a feature matrix x
+#         Parameters
+#         ----------
+#         x : torch.Tensor
+#             A [B,N,C] feature map consisting of N elements and C channels
+#         Returns
+#         -------
+#         x_transformed : torch.Tensor
+#             The transformed input matrix x (has fewer dimensions than the input x due to the fc layers).
+#         att_raw: torch.Tensor
+#             A [BxKxN] attention matrix.
+#         att: torch.Tensor:
+#             A [BxKxN] softmax-normalized attention matrix
+#         """
+#         att, x_transformed = self.attention_net(x)  # x_transformed = torch.Size([929, 512])
+#         att = torch.transpose(att, 1, 0)  # BxKxN  #att torch.Size([1, 1, 625])
+#         att_raw = att
+#         att = F.softmax(att, dim=1)  # softmax over N 
+#         return x_transformed, att_raw, att
+
+#     def forward(self, x):
+#         """
+#         Forward a feature vector through the attention network
+#         Parameters
+#         ----------
+#         x : torch.Tensor
+#             A [B, N, C] tensor containing the number of elements N in the feature map and the number of channels C
+#         Returns
+#         -------
+
+#         """
+#         x, att_raw, att = self._compute_attention(x) # x=h, att_raw=A_raw, att=A
+#         #pooled_features = torch.bmm(att, x) #batch matrix-matrix product # M = torch.mm(A, h) #torch.Size([1, 1, 512])
+#         pooled_features = torch.mm(att, x) #torch.Size([1, 512])
+#         att_pool_logits = self.classifiers(pooled_features)
+
+#         results_dict = {"attention": att_raw}
+
+#         if self.additive:
+#             classifier_out_dict = self.additive_classifiers(x, att.transpose(0, 1))
+#             bag_logits = classifier_out_dict["logits"]
+#             results_dict.update(
+#                 {"patch_logits": classifier_out_dict["patch_logits"], "att_pool_logits": att_pool_logits} 
+#             )
+
+#             return bag_logits, att_raw, results_dict
+#         return att_pool_logits, att_raw, results_dict

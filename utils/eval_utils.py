@@ -28,6 +28,7 @@ def initiate_model(args, ckpt_path, device='cuda'):
         model = CLAM_MB(**model_dict)
     elif args.model_type == 'addmil':
         model_dict.update({'additive': True})
+        model_dict.update({'use_rope': getattr(args, 'use_rope', False)})
         model = AttentionSingleBranch(**model_dict)
     else: # args.model_type == 'mil'
         if args.n_classes > 2:
@@ -53,7 +54,7 @@ def eval(dataset, args, ckpt_path):
     model = initiate_model(args, ckpt_path)
     print('Model loaded from: ', ckpt_path)
     print('Init Loaders')
-    loader = get_simple_loader(dataset)
+    loader = get_simple_loader(dataset, use_rope=getattr(args, 'use_rope', False))
     patient_results, test_error, auc, df, _ = summary(model, loader, args)
     print('test_error: ', test_error)
     print('auc: ', auc)
@@ -71,15 +72,25 @@ def summary(model, loader, args):
 
     slide_ids = loader.dataset.slide_data['slide_id']
     patient_results = {}
-    for batch_idx, (data, label) in enumerate(loader):
-        data, label = data.to(device), label.to(device)
+    for batch_idx, batch in enumerate(loader):
+        if getattr(args, 'use_rope', False):
+            data, label, coords = batch
+            data = data.to(device)
+            label = label.to(device)
+            coords = coords.to(device).float()
+        else:
+            data, label = batch
+            data, label = data.to(device), label.to(device)
         slide_id = slide_ids.iloc[batch_idx]
         
         with torch.no_grad():
             if isinstance(model, (CLAM_SB, CLAM_MB)):
                 logits, Y_prob, Y_hat, _, results_dict = model(data)
             elif isinstance(model, (AttentionSingleBranch,AttentionMultiBranch)):
-                logits, att_raw, results_dict = model(data) 
+                if getattr(args, 'use_rope', False):
+                    logits, att_raw, results_dict = model(data, coords=coords)
+                else:
+                    logits, att_raw, results_dict = model(data) 
                 Y_hat = torch.topk(logits, 1, dim = 1)[1].item() 
                 Y_prob = F.softmax(logits, dim = 1)
         

@@ -32,6 +32,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 	def __init__(self,
 		csv_path = 'dataset_csv/ccrcc_clean.csv',
 		shuffle = False, 
+		use_rope = False,
 		seed = 7, 
 		print_info = True,
 		label_dict = {},
@@ -53,6 +54,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		self.label_dict = label_dict
 		self.num_classes = len(set(self.label_dict.values()))
 		self.seed = seed
+		self.use_rope = use_rope
 		self.print_info = print_info
 		self.patient_strat = patient_strat
 		self.train_ids, self.val_ids, self.test_ids  = (None, None, None)
@@ -139,6 +141,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			return len(self.slide_data)
 
 	def summarize(self):
+		print(f"use_rope: {self.use_rope}")
 		print("label column: {}".format(self.label_col))
 		print("label dictionary: {}".format(self.label_dict))
 		print("number of classes: {}".format(self.num_classes))
@@ -319,7 +322,8 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 	
 		super(Generic_MIL_Dataset, self).__init__(**kwargs)
 		self.data_dir = data_dir
-		self.use_h5 = False
+		# RoPE requires coords, which are loaded from h5 files.
+		self.use_h5 = bool(kwargs.get('use_rope', False))
 
 	def load_from_h5(self, toggle):
 		self.use_h5 = toggle
