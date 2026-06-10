@@ -1,11 +1,11 @@
-# CLAM and Additive MIL
+# Attention-based Multiple Instance Learning (ABMIL) Core repository
 
 ## Status
 
 This repository accompanies a manuscript currently under review. The codebase, documentation and dataset access instructions may be updated during the peer-review and publication process. Additional resources, including the full dataset and reproducibility scripts, will be finalized upon acceptance of the manuscript. 
 
 ## About
-This repository integrates [**CLAM**](https://github.com/mahmoodlab/CLAM) with **Additive Multiple Instance Learning [(AddMIL)](https://openreview.net/forum?id=5dHQyEcYDgA)** [2]. It was developed to support the study:
+This repository integrates [**CLAM**](https://github.com/mahmoodlab/CLAM) with **Additive Multiple Instance Learning [(AddMIL)](https://openreview.net/forum?id=5dHQyEcYDgA)** [2]. It was developed with the intention of future extensions of other ABMIL methods, and to support the study:
 
 **Title** 
 : Automated detection of cutaneous squamous cell carcinoma (CSCC) in whole slide images of skin biopsies using weakly-supervised learning approaches
